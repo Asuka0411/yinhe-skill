@@ -58,6 +58,21 @@ python3 -m http.server 18793
 - 本地预演 `卖货` 到 `waiting`
 - 本地检查自动模式、日志、历史、配置面板行为
 
+推荐直接使用场景参数：
+
+- `http://127.0.0.1:18793/tests/gt-autopilot-harness.html?seed=sell`
+- `http://127.0.0.1:18793/tests/gt-autopilot-harness.html?seed=resupply`
+- `http://127.0.0.1:18793/tests/gt-autopilot-harness.html?seed=transit`
+
+## 已验证场景
+
+当前已在本地 harness 中实跑验证：
+
+- `检查`：可读取基地与飞船位置，并写入日志与运行历史
+- `卖货`：在 `seed=sell` 场景下，可识别白名单货物、切到基地仓库、发船到交易所，并以 `waiting` 结束本轮
+- `补货`：在 `seed=resupply` 场景下，可进入 `Resupply`、生成 wishlist、执行购买、发船回基地，并以 `waiting` 结束本轮
+- `自动`：在 `seed=sell` 场景下，可启动自动轮询、执行出货链，并在等待阶段保持状态栏显示为 `自动中`
+
 ## 说明
 
 - 当前已完成本地逻辑与面板验证。
