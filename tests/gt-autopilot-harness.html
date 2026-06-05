@@ -4,38 +4,1011 @@
     <meta charset="utf-8">
     <title>GT Autopilot Harness</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --bg-1: #09111b;
+        --bg-2: #132130;
+        --panel: rgba(12, 18, 28, 0.9);
+        --line: rgba(160, 206, 255, 0.18);
+        --text: #eef5ff;
+        --muted: rgba(238, 245, 255, 0.72);
+        --accent: #79d3ff;
+        --accent-2: #53a5e8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at top, rgba(37, 88, 136, 0.4), transparent 35%),
-          linear-gradient(180deg, #141922, #0d1118 55%, #0b0f16);
-        color: #eef5ff;
+          radial-gradient(circle at top left, rgba(70, 121, 183, 0.35), transparent 24%),
+          radial-gradient(circle at top right, rgba(79, 173, 194, 0.22), transparent 22%),
+          linear-gradient(180deg, var(--bg-2), var(--bg-1) 58%, #05080e);
+        color: var(--text);
         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
-      .copy {
-        max-width: 720px;
-        padding: 32px;
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(340px, 480px) 1fr;
+        gap: 20px;
+        padding: 24px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      .side {
+        padding: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
       }
 
       h1 {
-        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: 0.02em;
+      }
+
+      .lede {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .section {
+        margin-top: 18px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .stack {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button,
+      select,
+      input {
+        border-radius: 12px;
+        border: 1px solid rgba(134, 196, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        padding: 10px 12px;
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+        background: linear-gradient(180deg, rgba(77, 150, 215, 0.28), rgba(39, 75, 111, 0.42));
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 0;
+      }
+
+      .kv + .kv {
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: fit-content;
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: rgba(83, 165, 232, 0.16);
+        color: #d8f5ff;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .main {
+        padding: 18px;
+      }
+
+      .viewport {
+        min-height: 720px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-columns: 220px 1fr 260px;
+        min-height: 720px;
+      }
+
+      .nav,
+      .rightbar {
+        padding: 18px 16px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .nav {
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .rightbar {
+        border-left: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .nav-title {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(238, 245, 255, 0.55);
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .nav-item {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        color: var(--muted);
+      }
+
+      .nav-item.active {
+        border-color: rgba(121, 211, 255, 0.28);
+        background: rgba(121, 211, 255, 0.08);
+        color: var(--text);
+      }
+
+      .content {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .toolbar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .toolbar-title {
+        font-size: 22px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .summary-card,
+      .table-card,
+      .ship-card,
+      .wishlist-card {
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .summary-value {
+        margin-top: 8px;
         font-size: 24px;
       }
 
-      p {
-        margin: 0 0 8px;
-        opacity: 0.86;
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      th {
+        font-size: 12px;
+        color: rgba(238, 245, 255, 0.6);
+      }
+
+      .pill {
+        display: inline-flex;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .ship-card .status {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .wishlist-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .hint {
+        color: rgba(238, 245, 255, 0.55);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1200px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .nav,
+        .rightbar {
+          display: none;
+        }
+
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <div class="copy">
-      <h1>GT Autopilot 本地预览</h1>
-      <p>用于检查脚本面板的样式、日志显示和日志区高度拖拽。</p>
-      <p>该页面不接入游戏 API，只做界面预览。</p>
+    <div class="layout">
+      <aside class="card side">
+        <h1>GT Autopilot Harness</h1>
+        <p class="lede">本地模拟 GT 页面与 Local API，用于预演按钮式流程、自动模式、历史和日志，不依赖真实游戏登录态。</p>
+
+        <div class="section">
+          <div class="badge">当前场景</div>
+          <div class="stack">
+            <label>
+              页面
+              <select id="page-select">
+                <option value="base-overview">基地概览</option>
+                <option value="base-warehouse">基地仓库</option>
+                <option value="base-resupply">基地补货</option>
+                <option value="exchange">交易所</option>
+              </select>
+            </label>
+            <label>
+              飞船位置
+              <select id="ship-location-select">
+                <option value="base">基地</option>
+                <option value="exchange">交易所</option>
+                <option value="transit">运输中</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button id="seed-sell">装载卖货场景</button>
+              <button id="seed-resupply">装载补货场景</button>
+              <button id="seed-transit">装载运输场景</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 style="font-size:16px;">模拟数据</h2>
+          <div class="stack">
+            <div class="kv"><span>基地</span><strong id="meta-base-name">-</strong></div>
+            <div class="kv"><span>仓库 ID</span><strong id="meta-base-wh" class="mono">-</strong></div>
+            <div class="kv"><span>交易所仓库</span><strong id="meta-ex-wh" class="mono">-</strong></div>
+            <div class="kv"><span>飞船</span><strong id="meta-ship-name">-</strong></div>
+            <div class="kv"><span>货舱容量</span><strong id="meta-ship-capacity" class="mono">-</strong></div>
+            <div class="kv"><span>现金</span><strong id="meta-cash" class="mono">-</strong></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 style="font-size:16px;">辅助动作</h2>
+          <div class="stack">
+            <div class="button-row">
+              <button id="clear-storage">清空脚本存储</button>
+              <button id="rerender">重绘场景</button>
+            </div>
+            <p class="hint">脚本会在这个页面里真实写入 `localStorage`、读取模拟 `GTLocalAPI`，并更新自己的面板日志与历史。</p>
+          </div>
+        </div>
+      </aside>
+
+      <main class="card main">
+        <div class="viewport">
+          <div class="app-shell">
+            <aside class="nav">
+              <div class="nav-title">Base Navigation</div>
+              <div class="nav-list">
+                <div class="nav-item" data-nav="base-overview">Overview</div>
+                <div class="nav-item" data-nav="base-warehouse">Warehouse</div>
+                <div class="nav-item" data-nav="base-resupply">Resupply</div>
+                <div class="nav-item" data-nav="exchange">Exchange</div>
+              </div>
+            </aside>
+
+            <section class="content">
+              <div class="toolbar">
+                <div>
+                  <div class="toolbar-title" id="page-title">基地概览</div>
+                  <div class="hint" id="page-subtitle">模拟页</div>
+                </div>
+                <div class="toolbar-actions">
+                  <button id="nav-base-button">Base</button>
+                  <button id="nav-warehouse-button">Warehouse</button>
+                  <button id="nav-resupply-button">Resupply</button>
+                  <button id="nav-exchange-button">Exchange</button>
+                  <div class="badge" id="location-badge">飞船在基地</div>
+                </div>
+              </div>
+
+              <div class="grid summary-grid">
+                <div class="summary-card">
+                  <div class="hint">现金</div>
+                  <div class="summary-value mono" id="summary-cash">0</div>
+                </div>
+                <div class="summary-card">
+                  <div class="hint">基地白名单货物</div>
+                  <div class="summary-value mono" id="summary-base-mats">0</div>
+                </div>
+                <div class="summary-card">
+                  <div class="hint">Wishlist 条目</div>
+                  <div class="summary-value mono" id="summary-wishlist">0</div>
+                </div>
+              </div>
+
+              <div class="grid" style="margin-top:14px;">
+                <div class="ship-card">
+                  <h3>飞船状态</h3>
+                  <div id="ship-card" style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid rgba(121,211,255,0.18);background:rgba(121,211,255,0.06);">
+                    <strong id="ship-card-name">Demo Hauler</strong>
+                    <div class="hint" id="ship-card-meta">可供脚本识别的飞船卡片</div>
+                  </div>
+                  <div class="status" id="ship-status">-</div>
+                  <div class="button-row" style="margin-top:10px;">
+                    <button id="ship-to-base">切到基地</button>
+                    <button id="ship-to-exchange">切到交易所</button>
+                    <button id="ship-to-transit">切到运输中</button>
+                  </div>
+                  <div class="button-row" style="margin-top:10px;">
+                    <label style="width:220px;">
+                      Destination
+                      <input id="destination-input" type="text" placeholder="Destination" aria-label="Destination">
+                    </label>
+                    <button id="start-flight-button">Start Flight</button>
+                  </div>
+                  <div class="button-row" style="margin-top:10px;" id="destination-suggestions">
+                    <button class="destination-option">Exchange Station</button>
+                    <button class="destination-option">阿斯卡-合金基地</button>
+                  </div>
+                </div>
+
+                <div class="table-card" id="warehouse-card">
+                  <h3>仓库物资</h3>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>物资</th>
+                        <th>数量</th>
+                        <th>来源</th>
+                      </tr>
+                    </thead>
+                    <tbody id="warehouse-table"></tbody>
+                  </table>
+                </div>
+
+                <div class="table-card" id="resupply-card" hidden>
+                  <h3>Resupply</h3>
+                  <div class="button-row" style="margin-top:10px;">
+                    <label style="width:160px;">
+                      补货天数
+                      <input id="resupply-days-input" type="number" min="1" value="7" aria-label="resupply days">
+                    </label>
+                    <button id="wishlist-view-button">View Wishlist</button>
+                    <button id="wishlist-clear-button">Clear</button>
+                    <button id="wishlist-add-button">Add to Wishlist</button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>物资</th>
+                        <th>当前</th>
+                        <th>建议补货</th>
+                        <th>总重</th>
+                        <th>总价</th>
+                      </tr>
+                    </thead>
+                    <tbody id="resupply-table"></tbody>
+                  </table>
+                  <div style="margin-top:10px;" class="hint">
+                    TOTAL WEIGHT <span id="resupply-total-weight" class="mono">0</span>
+                    &nbsp;&nbsp; TOTAL COST <span id="resupply-total-cost" class="mono">0</span>
+                  </div>
+                </div>
+
+                <div class="wishlist-card" id="exchange-card" hidden>
+                  <h3>交易所</h3>
+                  <div class="button-row" style="margin-top:10px;">
+                    <input id="exchange-search" type="text" placeholder="Search material" aria-label="search material">
+                    <input id="trade-amount" type="number" min="1" value="1" placeholder="Amount" aria-label="amount">
+                    <button id="trade-buy-button">Buy</button>
+                    <button id="trade-sell-button">Sell</button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>物资</th>
+                        <th>基地</th>
+                        <th>交易所</th>
+                        <th>现价</th>
+                      </tr>
+                    </thead>
+                    <tbody id="exchange-table"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <aside class="rightbar">
+              <div class="nav-title">Wishlist</div>
+              <div class="stack" style="margin-top:14px;">
+                <div class="button-row">
+                  <button id="wishlist-seed-min">填充轻量补货单</button>
+                  <button id="wishlist-seed-heavy">填充超限补货单</button>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>物资</th>
+                      <th>数量</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wishlist-table"></tbody>
+                </table>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </main>
     </div>
+
+    <script>
+      (function () {
+        const state = {
+          page: 'base-overview',
+          shipLocation: 'base',
+          selectedMaterialId: 172,
+          selectedTradeAction: 'buy',
+          resupplyDays: 7,
+          selectedDestination: '',
+          company: {
+            id: 888,
+            name: 'Harness Corp',
+            credits: 950000,
+            exWhId: 9002,
+            ships: [
+              {
+                id: 7001,
+                name: 'Demo Hauler',
+                warehouseId: 9001,
+                pId: 70001,
+                capacity: 500,
+                flight: null
+              }
+            ],
+            bases: []
+          },
+          base: {
+            id: 501,
+            name: '阿斯卡-合金基地',
+            warehouseId: 9001,
+            planetId: 70001,
+            warehouse: {
+              id: 9001,
+              mats: []
+            }
+          },
+          exchangeWarehouse: {
+            id: 9002,
+            mats: []
+          },
+          wishlist: {
+            id: 70001,
+            title: '阿斯卡-合金基地 Wishlist',
+            mats: []
+          },
+          prices: [
+            { id: 1, matId: 172, price: 4200, buyPrice: 4200, sellPrice: 4200 },
+            { id: 2, matId: 136, price: 3800, buyPrice: 3800, sellPrice: 3800 },
+            { id: 3, matId: 12, price: 110, buyPrice: 110, sellPrice: 110 },
+            { id: 4, matId: 16, price: 70, buyPrice: 70, sellPrice: 70 },
+            { id: 5, matId: 17, price: 180, buyPrice: 180, sellPrice: 180 },
+            { id: 6, matId: 18, price: 460, buyPrice: 460, sellPrice: 460 },
+            { id: 7, matId: 26, price: 680, buyPrice: 680, sellPrice: 680 }
+          ],
+          gamedata: {
+            materials: [
+              { id: 12, name: 'Basic Rations' },
+              { id: 16, name: 'Drinking Water' },
+              { id: 17, name: 'Basic Tools' },
+              { id: 18, name: 'Advanced Tools' },
+              { id: 26, name: 'Basic Construction Kit' },
+              { id: 136, name: 'Tiridium Alloy' },
+              { id: 172, name: 'Graphenium' }
+            ]
+          },
+          resupplyRows: []
+        };
+
+        const materialNames = Object.fromEntries(state.gamedata.materials.map((m) => [m.id, m.name]));
+
+        function setSeed(seed) {
+          if (seed === 'sell') {
+            state.shipLocation = 'base';
+            state.page = 'base-warehouse';
+            state.company.credits = 950000;
+            state.base.warehouse.mats = [
+              { id: 172, am: 24 },
+              { id: 136, am: 9 },
+              { id: 12, am: 60 }
+            ];
+            state.exchangeWarehouse.mats = [
+              { id: 172, am: 0 },
+              { id: 136, am: 0 }
+            ];
+            state.wishlist.mats = [];
+            state.resupplyRows = [
+              { id: 12, current: 60, perDay: 4, weight: 1, unitPrice: 110 },
+              { id: 16, current: 48, perDay: 5, weight: 1, unitPrice: 70 },
+              { id: 17, current: 14, perDay: 2, weight: 2, unitPrice: 180 }
+            ];
+          } else if (seed === 'resupply') {
+            state.shipLocation = 'exchange';
+            state.page = 'exchange';
+            state.company.credits = 280000;
+            state.base.warehouse.mats = [
+              { id: 12, am: 5 },
+              { id: 16, am: 4 },
+              { id: 17, am: 1 }
+            ];
+            state.exchangeWarehouse.mats = [
+              { id: 12, am: 120 },
+              { id: 16, am: 140 },
+              { id: 17, am: 45 },
+              { id: 18, am: 22 }
+            ];
+            state.wishlist.mats = [
+              { matId: 12, amount: 18 },
+              { matId: 16, amount: 16 }
+            ];
+            state.resupplyRows = [
+              { id: 12, current: 5, perDay: 4, weight: 1, unitPrice: 110 },
+              { id: 16, current: 4, perDay: 5, weight: 1, unitPrice: 70 },
+              { id: 17, current: 1, perDay: 2, weight: 2, unitPrice: 180 },
+              { id: 18, current: 0, perDay: 1, weight: 3, unitPrice: 460 }
+            ];
+          } else if (seed === 'transit') {
+            setSeed('sell');
+            state.shipLocation = 'transit';
+            state.page = 'base-overview';
+            state.company.ships[0].flight = {
+              aDate: '2026-06-05T12:00:00Z'
+            };
+            state.company.ships[0].warehouseId = 0;
+            state.company.ships[0].pId = 0;
+            return render();
+          }
+
+          syncShipState();
+          render();
+        }
+
+        function syncShipState() {
+          const ship = state.company.ships[0];
+          ship.flight = null;
+          if (state.shipLocation === 'base') {
+            ship.warehouseId = state.base.warehouseId;
+            ship.pId = state.base.planetId;
+          } else if (state.shipLocation === 'exchange') {
+            ship.warehouseId = state.company.exWhId;
+            ship.pId = 99999;
+          } else {
+            ship.warehouseId = 0;
+            ship.pId = 0;
+            ship.flight = { aDate: '2026-06-05T12:00:00Z' };
+          }
+        }
+
+        function updateResupplyTotals() {
+          const weight = state.wishlist.mats.reduce((sum, item) => {
+            const row = state.resupplyRows.find((entry) => entry.id === item.matId);
+            return sum + (row ? row.weight * item.amount : 0);
+          }, 0);
+          const cost = state.wishlist.mats.reduce((sum, item) => {
+            const row = state.resupplyRows.find((entry) => entry.id === item.matId);
+            return sum + (row ? row.unitPrice * item.amount : 0);
+          }, 0);
+          document.getElementById('resupply-total-weight').textContent = String(weight);
+          document.getElementById('resupply-total-cost').textContent = String(cost);
+        }
+
+        function renderNav() {
+          document.querySelectorAll('[data-nav]').forEach((node) => {
+            node.classList.toggle('active', node.getAttribute('data-nav') === state.page);
+          });
+        }
+
+        function renderMeta() {
+          document.getElementById('meta-base-name').textContent = state.base.name;
+          document.getElementById('meta-base-wh').textContent = String(state.base.warehouseId);
+          document.getElementById('meta-ex-wh').textContent = String(state.company.exWhId);
+          document.getElementById('meta-ship-name').textContent = state.company.ships[0].name;
+          document.getElementById('meta-ship-capacity').textContent = String(state.company.ships[0].capacity);
+          document.getElementById('meta-cash').textContent = String(state.company.credits);
+          document.getElementById('summary-cash').textContent = String(state.company.credits);
+          document.getElementById('summary-base-mats').textContent = String(state.base.warehouse.mats.length);
+          document.getElementById('summary-wishlist').textContent = String(state.wishlist.mats.length);
+        }
+
+        function renderPageTitle() {
+          const titleMap = {
+            'base-overview': ['基地概览', 'Overview'],
+            'base-warehouse': ['基地仓库', 'Warehouse'],
+            'base-resupply': ['基地补货', 'Resupply'],
+            'exchange': ['交易所', 'Exchange']
+          };
+          const [title, subtitle] = titleMap[state.page];
+          document.getElementById('page-title').textContent = title;
+          document.getElementById('page-subtitle').textContent = subtitle;
+          document.getElementById('location-badge').textContent =
+            state.shipLocation === 'base' ? '飞船在基地' :
+            state.shipLocation === 'exchange' ? '飞船在交易所' :
+            '飞船运输中';
+        }
+
+        function renderWarehouseTable() {
+          const source = state.page === 'exchange' ? state.exchangeWarehouse.mats : state.base.warehouse.mats;
+          document.getElementById('warehouse-table').innerHTML = source.map((item) => (
+            `<tr><td>${materialNames[item.id] || ('Material ' + item.id)}</td><td>${item.am}</td><td><span class="pill">${state.page === 'exchange' ? 'Exchange' : 'Base'}</span></td></tr>`
+          )).join('');
+        }
+
+        function renderExchangeTable() {
+          document.getElementById('exchange-table').innerHTML = state.prices.map((price) => {
+            const baseMat = state.base.warehouse.mats.find((item) => item.id === price.matId);
+            const exMat = state.exchangeWarehouse.mats.find((item) => item.id === price.matId);
+            return `<tr data-mat-id="${price.matId}">
+              <td>${materialNames[price.matId] || ('Material ' + price.matId)}</td>
+              <td>${baseMat ? baseMat.am : 0}</td>
+              <td>${exMat ? exMat.am : 0}</td>
+              <td>${price.price}</td>
+            </tr>`;
+          }).join('');
+        }
+
+        function renderWishlistTable() {
+          document.getElementById('wishlist-table').innerHTML = state.wishlist.mats.map((item) => (
+            `<tr><td>${materialNames[item.matId] || ('Material ' + item.matId)}</td><td>${item.amount}</td></tr>`
+          )).join('');
+          updateResupplyTotals();
+        }
+
+        function renderResupplyTable() {
+          const days = Number(document.getElementById('resupply-days-input').value || state.resupplyDays || 7);
+          state.resupplyDays = days;
+          const rows = state.resupplyRows.map((row) => {
+            const amount = Math.max(1, Math.ceil(row.perDay * days - row.current));
+            return {
+              id: row.id,
+              amount,
+              weight: amount * row.weight,
+              cost: amount * row.unitPrice
+            };
+          });
+          document.getElementById('resupply-table').innerHTML = state.resupplyRows.map((row) => {
+            const amount = Math.max(1, Math.ceil(row.perDay * days - row.current));
+            const totalWeight = amount * row.weight;
+            const totalCost = amount * row.unitPrice;
+            return `<tr data-resupply-mat-id="${row.id}">
+              <td><input type="checkbox" checked></td>
+              <td>${materialNames[row.id] || ('Material ' + row.id)}</td>
+              <td>${row.current}</td>
+              <td>${amount}</td>
+              <td>${totalWeight}</td>
+              <td>${totalCost}</td>
+            </tr>`;
+          }).join('');
+          state._resupplyComputedRows = rows;
+          updateResupplyTotals();
+        }
+
+        function renderVisibility() {
+          document.getElementById('resupply-card').hidden = state.page !== 'base-resupply';
+          document.getElementById('exchange-card').hidden = state.page !== 'exchange';
+          document.getElementById('warehouse-card').querySelector('h3').textContent =
+            state.page === 'exchange' ? '交易所库存概览' : '仓库物资';
+        }
+
+        function renderShipStatus() {
+          const ship = state.company.ships[0];
+          const text =
+            state.shipLocation === 'base' ? `飞船停靠在基地仓库 #${ship.warehouseId}` :
+            state.shipLocation === 'exchange' ? `飞船停靠在交易所仓库 #${ship.warehouseId}` :
+            `飞船运输中，预计到达 ${ship.flight && ship.flight.aDate}`;
+          document.getElementById('ship-status').textContent = text;
+          document.getElementById('ship-card-name').textContent = ship.name;
+          document.getElementById('ship-card-meta').textContent = state.shipLocation === 'transit' ? '运输中，可等待到站' : '当前可用于发货/补货';
+          document.getElementById('destination-input').value = state.selectedDestination;
+        }
+
+        function render() {
+          renderNav();
+          renderMeta();
+          renderPageTitle();
+          renderVisibility();
+          renderWarehouseTable();
+          renderExchangeTable();
+          renderWishlistTable();
+          renderResupplyTable();
+          renderShipStatus();
+          document.getElementById('page-select').value = state.page;
+          document.getElementById('ship-location-select').value = state.shipLocation;
+        }
+
+        function setPage(page) {
+          state.page = page;
+          var nextUrl = new URL(window.location.href);
+          nextUrl.pathname = '/tests/gt-autopilot-harness.html';
+          nextUrl.searchParams.set('baseId', String(state.base.id));
+          if (page === 'exchange') {
+            nextUrl.searchParams.set('view', 'exchange');
+            nextUrl.searchParams.delete('tab');
+          } else {
+            nextUrl.searchParams.set('view', 'base');
+            if (page === 'base-overview') {
+              nextUrl.searchParams.delete('tab');
+            } else if (page === 'base-warehouse') {
+              nextUrl.searchParams.set('tab', 'warehouse');
+            } else if (page === 'base-resupply') {
+              nextUrl.searchParams.set('tab', 'resupply');
+            }
+          }
+          history.replaceState({}, '', nextUrl.toString());
+          render();
+        }
+
+        function updateShipLocation(location) {
+          state.shipLocation = location;
+          syncShipState();
+          render();
+        }
+
+        function startFlight() {
+          const destination = (document.getElementById('destination-input').value || state.selectedDestination || '').trim();
+          state.selectedDestination = destination;
+          if (!destination) {
+            return;
+          }
+          if (destination.toLowerCase().includes('exchange')) {
+            state.page = 'exchange';
+            updateShipLocation('exchange');
+            return;
+          }
+          state.page = 'base-warehouse';
+          updateShipLocation('base');
+        }
+
+        function clearScriptStorage() {
+          Object.keys(localStorage).filter((key) => key.startsWith('gtap:')).forEach((key) => localStorage.removeItem(key));
+        }
+
+        function buildWishlistFromResupply() {
+          const selectedRows = Array.from(document.querySelectorAll('#resupply-table tr')).filter((row) => {
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            return checkbox && checkbox.checked;
+          });
+          state.wishlist.mats = selectedRows.map((row) => {
+            const id = Number(row.getAttribute('data-resupply-mat-id'));
+            const found = state._resupplyComputedRows.find((item) => item.id === id);
+            return {
+              matId: id,
+              amount: found ? found.amount : 1
+            };
+          });
+          renderWishlistTable();
+        }
+
+        function trade(action) {
+          const materialName = document.getElementById('exchange-search').value.trim();
+          const priceRow = state.prices.find((item) => (materialNames[item.matId] || '').toLowerCase().includes(materialName.toLowerCase())) || state.prices[0];
+          const matId = priceRow.matId;
+          const amount = Math.max(1, Number(document.getElementById('trade-amount').value || 1));
+          const baseMat = state.base.warehouse.mats.find((item) => item.id === matId);
+          const exchangeMat = state.exchangeWarehouse.mats.find((item) => item.id === matId);
+          if (action === 'buy') {
+            state.company.credits -= priceRow.price * amount;
+            if (exchangeMat) {
+              exchangeMat.am = Math.max(0, exchangeMat.am - amount);
+            }
+            if (baseMat) {
+              baseMat.am += amount;
+            } else {
+              state.base.warehouse.mats.push({ id: matId, am: amount });
+            }
+          } else {
+            state.company.credits += priceRow.price * amount;
+            if (baseMat) {
+              baseMat.am = Math.max(0, baseMat.am - amount);
+            }
+            if (exchangeMat) {
+              exchangeMat.am += amount;
+            } else {
+              state.exchangeWarehouse.mats.push({ id: matId, am: amount });
+            }
+          }
+          render();
+        }
+
+        function installLocalApiMock() {
+          window.addEventListener('message', function (event) {
+            const data = event.data;
+            if (!data || data.type !== 'GT_LAPI_REQUEST') {
+              return;
+            }
+
+            let payload;
+            let success = true;
+            try {
+              switch (data.action) {
+                case 'getMyCompany':
+                  payload = JSON.parse(JSON.stringify({
+                    ...state.company,
+                    bases: [
+                      {
+                        id: state.base.id,
+                        name: state.base.name,
+                        warehouseId: state.base.warehouseId,
+                        planetId: state.base.planetId
+                      }
+                    ]
+                  }));
+                  break;
+                case 'getPrices':
+                  payload = JSON.parse(JSON.stringify(state.prices));
+                  break;
+                case 'getBase':
+                  payload = JSON.parse(JSON.stringify(state.base));
+                  break;
+                case 'getWarehouse':
+                  payload = Number(data.params && data.params.warehouseId) === state.company.exWhId
+                    ? JSON.parse(JSON.stringify(state.exchangeWarehouse))
+                    : JSON.parse(JSON.stringify(state.base.warehouse));
+                  break;
+                case 'getWishlists':
+                  payload = [{ id: state.wishlist.id, title: state.wishlist.title, mats: state.wishlist.mats }];
+                  break;
+                case 'getWishlist':
+                  payload = JSON.parse(JSON.stringify(state.wishlist));
+                  break;
+                default:
+                  throw new Error('Unsupported mock action: ' + data.action);
+              }
+            } catch (error) {
+              success = false;
+              payload = error.message;
+            }
+
+            window.postMessage({
+              type: 'GT_LAPI_RESPONSE',
+              requestId: data.requestId,
+              success,
+              data: success ? JSON.stringify(payload) : '',
+              error: success ? '' : payload
+            }, window.location.origin);
+          });
+        }
+
+        document.getElementById('page-select').addEventListener('change', (event) => setPage(event.target.value));
+        document.getElementById('ship-location-select').addEventListener('change', (event) => updateShipLocation(event.target.value));
+        document.getElementById('seed-sell').addEventListener('click', () => setSeed('sell'));
+        document.getElementById('seed-resupply').addEventListener('click', () => setSeed('resupply'));
+        document.getElementById('seed-transit').addEventListener('click', () => setSeed('transit'));
+        document.getElementById('clear-storage').addEventListener('click', clearScriptStorage);
+        document.getElementById('rerender').addEventListener('click', render);
+        document.getElementById('ship-to-base').addEventListener('click', () => updateShipLocation('base'));
+        document.getElementById('ship-to-exchange').addEventListener('click', () => updateShipLocation('exchange'));
+        document.getElementById('ship-to-transit').addEventListener('click', () => updateShipLocation('transit'));
+        document.getElementById('nav-base-button').addEventListener('click', () => setPage('base-overview'));
+        document.getElementById('nav-warehouse-button').addEventListener('click', () => setPage('base-warehouse'));
+        document.getElementById('nav-resupply-button').addEventListener('click', () => setPage('base-resupply'));
+        document.getElementById('nav-exchange-button').addEventListener('click', () => setPage('exchange'));
+        document.getElementById('destination-input').addEventListener('input', (event) => {
+          state.selectedDestination = event.target.value;
+        });
+        document.getElementById('start-flight-button').addEventListener('click', startFlight);
+        document.querySelectorAll('.destination-option').forEach((button) => {
+          button.addEventListener('click', () => {
+            state.selectedDestination = button.textContent.trim();
+            document.getElementById('destination-input').value = state.selectedDestination;
+          });
+        });
+        document.getElementById('wishlist-clear-button').addEventListener('click', () => {
+          state.wishlist.mats = [];
+          renderWishlistTable();
+        });
+        document.getElementById('wishlist-add-button').addEventListener('click', buildWishlistFromResupply);
+        document.getElementById('wishlist-seed-min').addEventListener('click', () => {
+          state.wishlist.mats = [{ matId: 12, amount: 10 }, { matId: 16, amount: 12 }];
+          renderWishlistTable();
+        });
+        document.getElementById('wishlist-seed-heavy').addEventListener('click', () => {
+          state.wishlist.mats = [{ matId: 12, amount: 120 }, { matId: 16, amount: 140 }, { matId: 17, amount: 45 }];
+          renderWishlistTable();
+        });
+        document.getElementById('trade-buy-button').addEventListener('click', () => trade('buy'));
+        document.getElementById('trade-sell-button').addEventListener('click', () => trade('sell'));
+        document.getElementById('resupply-days-input').addEventListener('input', renderResupplyTable);
+        document.querySelectorAll('[data-nav]').forEach((node) => {
+          node.addEventListener('click', () => setPage(node.getAttribute('data-nav')));
+        });
+
+        state.company.bases = [
+          {
+            id: state.base.id,
+            name: state.base.name,
+            warehouseId: state.base.warehouseId,
+            planetId: state.base.planetId
+          }
+        ];
+
+        installLocalApiMock();
+        setSeed('sell');
+      })();
+    </script>
     <script src="../gt-autopilot.user.js"></script>
     <script>
       window.createGalacticTycoonsAutopilot(window).start();

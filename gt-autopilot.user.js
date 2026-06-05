@@ -277,6 +277,17 @@
     return map;
   }
 
+  function findPriceForMaterial(prices, materialId) {
+    var id = Number(materialId);
+    var list = Array.isArray(prices) ? prices : [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (Number(list[i] && (list[i].matId != null ? list[i].matId : list[i].id)) === id) {
+        return list[i];
+      }
+    }
+    return null;
+  }
+
   function normalizeOutboundWhitelist(entries, materialNames) {
     var names = materialNames || {};
     var seen = new Set();
@@ -551,6 +562,7 @@
   function collectBatchFromWarehouse(warehouse, config) {
     var whitelist = (config && config.outboundWhitelist) || [];
     var byId = mapById((warehouse && warehouse.mats) || []);
+    var fallbackNames = defaultMaterialNames();
     return whitelist
       .filter(function (entry) {
         return entry && entry.enabled;
@@ -560,7 +572,7 @@
         var amount = amountOf(current);
         return {
           id: Number(entry.id),
-          name: entry.name || ('Material ' + entry.id),
+          name: entry.name || fallbackNames[Number(entry.id)] || ('Material ' + entry.id),
           current: amount,
           minAmount: Number(entry.minAmount || 1),
           canSend: amount >= Number(entry.minAmount || 1),
@@ -705,7 +717,7 @@
     var win = env && env.window ? env.window : root;
     var doc = env && env.document ? env.document : root.document;
     var storage = resolveStorage();
-    var api = createApiClient(win);
+    var apiClient = createApiClient(win);
     var materialNames = defaultMaterialNames();
     var storesByBaseId = new Map();
     var panelLogHeightKey = 'gtap:panel:logHeight';
@@ -965,25 +977,31 @@
 
     function readBaseContext() {
       var company;
+      var baseSummary;
       var base;
       var exchangeWarehouse;
       var snapshot;
       var baseId;
       var baseConfig;
 
-      return api.request('getMyCompany').then(function (companyData) {
+      return apiClient.request('getMyCompany').then(function (companyData) {
         company = companyData || {};
         baseId = getCurrentBaseId();
-        base = (company.bases || []).find(function (item) {
+        baseSummary = (company.bases || []).find(function (item) {
           return Number(item.id) === Number(baseId);
         }) || (company.bases || [])[0] || null;
-        state.currentBaseId = base && base.id != null ? Number(base.id) : null;
+        state.currentBaseId = baseSummary && baseSummary.id != null ? Number(baseSummary.id) : null;
         var stores = resolveStores(state.currentBaseId);
         state.baseStore = stores.baseStore;
         state.historyStore = stores.historyStore;
         baseConfig = state.baseStore.read();
-        return api.request('getPrices').then(function (prices) {
-          var exchangePromise = company && company.exWhId ? api.request('getWarehouse', { warehouseId: company.exWhId }).catch(function () {
+        var basePromise = state.currentBaseId ? apiClient.request('getBase', { baseId: state.currentBaseId }).catch(function () {
+          return baseSummary;
+        }) : Promise.resolve(baseSummary);
+        return basePromise.then(function (baseData) {
+          base = baseData || baseSummary;
+          return apiClient.request('getPrices').then(function (prices) {
+          var exchangePromise = company && company.exWhId ? apiClient.request('getWarehouse', { warehouseId: company.exWhId }).catch(function () {
             return null;
           }) : Promise.resolve(null);
           return exchangePromise.then(function (exchangeWarehouseData) {
@@ -1001,6 +1019,7 @@
             state.lastSnapshot = snapshot;
             return snapshot;
           });
+        });
         });
       });
     }
@@ -1402,7 +1421,7 @@
       if (directPlanetId > 0) {
         return Promise.resolve(directPlanetId);
       }
-      return api.request('getWishlists').then(function (wishlists) {
+      return apiClient.request('getWishlists').then(function (wishlists) {
         var list = Array.isArray(wishlists) ? wishlists : [];
         var baseName = normalizeText(base && base.name);
         var match = list.find(function (item) {
@@ -1419,13 +1438,12 @@
         if (!wishlistId) {
           return [];
         }
-        return api.request('getWishlist', { wishlistId: wishlistId }).then(function (wishlist) {
+        return apiClient.request('getWishlist', { wishlistId: wishlistId }).then(function (wishlist) {
           var mats = Array.isArray(wishlist && wishlist.mats) ? wishlist.mats : [];
-          var pricesById = mapById((state.lastSnapshot && state.lastSnapshot.prices) || []);
           return mats.map(function (item) {
             var id = Number(item.matId || item.id || item.i || 0);
             var amount = Number(item.amount || item.am || item.a || 0);
-            var price = pricesById.get(id) || {};
+            var price = findPriceForMaterial((state.lastSnapshot && state.lastSnapshot.prices) || [], id) || {};
             var unitPrice = Number(price.price || price.sellPrice || price.buyPrice || price.avgPrice || 0);
             if (!id || !amount) {
               return null;
@@ -2055,6 +2073,7 @@
       collectOutboundBatch: collectOutboundBatch,
       collectBatchFromWarehouse: collectBatchFromWarehouse,
       inferShipLocation: inferShipLocation,
+      findPriceForMaterial: findPriceForMaterial,
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
       resolveAutoWaitMs: resolveAutoWaitMs,
       ensureCurrentStores: ensureCurrentStores,

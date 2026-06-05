@@ -19,11 +19,13 @@
 
 ## 当前能力
 
-- 按钮式控制：`卖货`、`补货`、`检查`、`等待`、`停止`
+- 按钮式控制：`卖货`、`补货`、`自动`、`检查`、`等待`、`停止`
 - 单基地、单飞船
 - 基地级配置：`API Key`、`补齐天数`、`卖货白名单`、`最小发货量`
 - 运行历史与日志面板
 - 日志区域支持拖拽调整高度
+- 自动模式基础轮询与恢复
+- 本地交互式 harness，可模拟基地/交易所/运输中场景
 
 ## 本地验证
 
@@ -31,6 +33,30 @@
 node --check gt-autopilot.user.js
 node --test tests/gt-autopilot.test.js
 ```
+
+## 本地预演
+
+```bash
+python3 -m http.server 18793
+```
+
+然后打开：
+
+- [tests/gt-autopilot-harness.html](http://127.0.0.1:18793/tests/gt-autopilot-harness.html)
+
+该页面会模拟：
+
+- `GT Local API`
+- 基地仓库 / 交易所仓库
+- 飞船位置切换
+- `Resupply -> Add to Wishlist`
+- 基础买卖与发船动作
+
+用途：
+
+- 本地预演 `检查`
+- 本地预演 `卖货` 到 `waiting`
+- 本地检查自动模式、日志、历史、配置面板行为
 
 ## 说明
 
