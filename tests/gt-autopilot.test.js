@@ -159,3 +159,30 @@ test('resolveAutoWaitMs 会根据飞船位置选择轮询间隔', () => {
   assert.equal(api.resolveAutoWaitMs({ shipInfo: { location: 'base' } }), 15000);
   assert.equal(api.resolveAutoWaitMs({ shipInfo: { location: 'exchange' } }), 15000);
 });
+
+test('resolveLoopWaitMs 会优先使用链路结果自带的等待时间', () => {
+  const api = createGtAutopilot();
+  assert.equal(
+    api.resolveLoopWaitMs({ shipInfo: { location: 'base' } }, { waitMs: 30000 }),
+    30000
+  );
+  assert.equal(
+    api.resolveLoopWaitMs({ shipInfo: { location: 'transit' } }, null),
+    30000
+  );
+  assert.equal(
+    api.resolveLoopWaitMs({ shipInfo: { location: 'exchange' } }, {}),
+    15000
+  );
+});
+
+test('findPriceForMaterial 会优先按 matId 匹配价格', () => {
+  const api = createGtAutopilot();
+  const prices = [
+    { id: 1, matId: 12, price: 110 },
+    { id: 2, matId: 172, price: 4200 }
+  ];
+
+  assert.deepEqual(api.findPriceForMaterial(prices, 172), { id: 2, matId: 172, price: 4200 });
+  assert.equal(api.findPriceForMaterial(prices, 999), null);
+});

@@ -960,6 +960,13 @@
       return location === 'transit' ? DEFAULTS.transportWaitIntervalMs : DEFAULTS.pollIntervalMs;
     }
 
+    function resolveLoopWaitMs(snapshot, result) {
+      if (result && Number(result.waitMs) > 0) {
+        return Number(result.waitMs);
+      }
+      return resolveAutoWaitMs(snapshot);
+    }
+
     function scheduleAutoLoop(waitMs) {
       if (!state.autoLoopEnabled) {
         return;
@@ -1143,6 +1150,7 @@
             batch: batch,
             sold: [],
             ship: shipInfo.ship,
+            waitMs: DEFAULTS.transportWaitIntervalMs,
           };
         });
       });
@@ -1178,11 +1186,12 @@
           return moveShipToDestination(shipInfo.ship, base && base.name ? base.name : 'Base').then(function () {
             pushStep('运输', '已尝试发船回基地');
             return {
-              next: 'done',
+              next: 'wait',
               wishlist: wishlistResult.wishlist,
               reduceResult: wishlistResult.reduceResult,
               buySummary: buySummary,
               ship: shipInfo.ship,
+              waitMs: DEFAULTS.transportWaitIntervalMs,
             };
           });
         });
@@ -1260,7 +1269,7 @@
             return;
           }
           if (result && result.next === 'wait') {
-            scheduleAutoLoop(resolveAutoWaitMs(snapshot));
+            scheduleAutoLoop(resolveLoopWaitMs(snapshot, result));
             return;
           }
           scheduleAutoLoop(DEFAULTS.pollIntervalMs);
@@ -2076,12 +2085,11 @@
       findPriceForMaterial: findPriceForMaterial,
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
       resolveAutoWaitMs: resolveAutoWaitMs,
+      resolveLoopWaitMs: resolveLoopWaitMs,
       ensureCurrentStores: ensureCurrentStores,
       createApp: createApp,
       start: function () {
-        ensurePanel();
-        updateStatus('就绪');
-        return api;
+        return start();
       },
       constants: {
         defaults: deepClone(DEFAULTS),

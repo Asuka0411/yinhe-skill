@@ -799,6 +799,44 @@
           document.getElementById('ship-location-select').value = state.shipLocation;
         }
 
+        function applyQueryState() {
+          const params = new URLSearchParams(window.location.search);
+          const seed = params.get('seed');
+          const page = params.get('page');
+          const shipLocation = params.get('shipLocation');
+
+          if (seed === 'sell' || seed === 'resupply' || seed === 'transit') {
+            setSeed(seed);
+          } else {
+            setSeed('sell');
+          }
+
+          if (page && ['base-overview', 'base-warehouse', 'base-resupply', 'exchange'].includes(page)) {
+            state.page = page;
+          }
+
+          if (shipLocation && ['base', 'exchange', 'transit'].includes(shipLocation)) {
+            state.shipLocation = shipLocation;
+            syncShipState();
+          }
+
+          render();
+        }
+
+        function snapshotState() {
+          return JSON.parse(JSON.stringify({
+            page: state.page,
+            shipLocation: state.shipLocation,
+            selectedDestination: state.selectedDestination,
+            company: state.company,
+            base: state.base,
+            exchangeWarehouse: state.exchangeWarehouse,
+            wishlist: state.wishlist,
+            prices: state.prices,
+            resupplyRows: state.resupplyRows
+          }));
+        }
+
         function setPage(page) {
           state.page = page;
           var nextUrl = new URL(window.location.href);
@@ -1006,7 +1044,16 @@
         ];
 
         installLocalApiMock();
-        setSeed('sell');
+        applyQueryState();
+        window.__GT_HARNESS__ = {
+          setSeed,
+          setPage,
+          updateShipLocation,
+          startFlight,
+          clearScriptStorage,
+          render,
+          snapshotState
+        };
       })();
     </script>
     <script src="../gt-autopilot.user.js"></script>
