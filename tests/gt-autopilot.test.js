@@ -176,6 +176,22 @@ test('resolveLoopWaitMs 会优先使用链路结果自带的等待时间', () =>
   );
 });
 
+test('resolveStatusText 会在自动模式空闲时保持自动中', () => {
+  const api = createGtAutopilot();
+  assert.equal(
+    api.resolveStatusText({ running: false, autoLoopEnabled: true }),
+    '自动中'
+  );
+  assert.equal(
+    api.resolveStatusText({ running: true, autoLoopEnabled: true }),
+    '运行中'
+  );
+  assert.equal(
+    api.resolveStatusText({ running: false, autoLoopEnabled: false }),
+    '就绪'
+  );
+});
+
 test('findPriceForMaterial 会优先按 matId 匹配价格', () => {
   const api = createGtAutopilot();
   const prices = [

@@ -934,6 +934,16 @@
       }
     }
 
+    function resolveStatusText(runtimeState) {
+      if (runtimeState && runtimeState.running) {
+        return '运行中';
+      }
+      if (runtimeState && runtimeState.autoLoopEnabled) {
+        return '自动中';
+      }
+      return '就绪';
+    }
+
     function clearAutoLoopTimer() {
       if (state.autoLoopTimer) {
         win.clearTimeout(state.autoLoopTimer);
@@ -952,7 +962,7 @@
           return next;
         });
       }
-      updateStatus(enabled ? '自动中' : (state.running ? '运行中' : '就绪'));
+      updateStatus(resolveStatusText(state));
     }
 
     function resolveAutoWaitMs(snapshot) {
@@ -1045,7 +1055,7 @@
 
     function setRunning(value) {
       state.running = !!value;
-      updateStatus(state.running ? '运行中' : '就绪');
+      updateStatus(resolveStatusText(state));
     }
 
     function startRun(chain) {
@@ -2062,7 +2072,7 @@
       ensureCurrentStores();
       ensurePanel();
       var config = state.baseStore ? state.baseStore.read() : null;
-      updateStatus('就绪');
+      updateStatus(resolveStatusText(state));
       if (config && config.workflow && config.workflow.autoMode) {
         setAutoLoopEnabled(true);
         scheduleAutoLoop(DEFAULTS.pollIntervalMs);
@@ -2084,6 +2094,7 @@
       inferShipLocation: inferShipLocation,
       findPriceForMaterial: findPriceForMaterial,
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
+      resolveStatusText: resolveStatusText,
       resolveAutoWaitMs: resolveAutoWaitMs,
       resolveLoopWaitMs: resolveLoopWaitMs,
       ensureCurrentStores: ensureCurrentStores,
