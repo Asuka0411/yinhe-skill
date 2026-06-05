@@ -152,3 +152,10 @@ test('inferShipLocation 会根据仓库、星球与 flight 判断位置', () => 
   assert.equal(api.inferShipLocation({ exWhId: 202, ships: [{ id: 1, warehouseId: 202, pId: 999 }] }, base).location, 'exchange');
   assert.equal(api.inferShipLocation({ exWhId: 202, ships: [{ id: 3, warehouseId: 0, pId: 0, flight: { aDate: '2026-06-05T12:00:00Z' } }] }, base).location, 'transit');
 });
+
+test('resolveAutoWaitMs 会根据飞船位置选择轮询间隔', () => {
+  const api = createGtAutopilot();
+  assert.equal(api.resolveAutoWaitMs({ shipInfo: { location: 'transit' } }), 30000);
+  assert.equal(api.resolveAutoWaitMs({ shipInfo: { location: 'base' } }), 15000);
+  assert.equal(api.resolveAutoWaitMs({ shipInfo: { location: 'exchange' } }), 15000);
+});

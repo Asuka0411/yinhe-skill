@@ -191,7 +191,7 @@
   }
 
   function pickInitialChain(snapshot) {
-    var location = snapshot && snapshot.shipLocation;
+    var location = snapshot && (snapshot.shipLocation || (snapshot.shipInfo && snapshot.shipInfo.location));
     if (location === 'base') {
       return 'sell_chain';
     }
@@ -712,6 +712,8 @@
     var state = {
       running: false,
       stopped: false,
+      autoLoopEnabled: false,
+      autoLoopTimer: null,
       currentChain: null,
       currentRun: null,
       lastSnapshot: null,
@@ -730,6 +732,23 @@
         });
       }
       return storesByBaseId.get(key);
+    }
+
+    function ensureCurrentStores() {
+      var baseId = state.currentBaseId;
+      if (baseId == null) {
+        baseId = getCurrentBaseId();
+        state.currentBaseId = baseId || null;
+      }
+      if (!state.baseStore || !state.historyStore) {
+        var stores = resolveStores(baseId || 'global');
+        state.baseStore = stores.baseStore;
+        state.historyStore = stores.historyStore;
+      }
+      return {
+        baseStore: state.baseStore,
+        historyStore: state.historyStore,
+      };
     }
 
     function log(message) {
@@ -784,6 +803,7 @@
         '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;">',
         '<button data-action="sell">卖货</button>',
         '<button data-action="resupply">补货</button>',
+        '<button data-action="auto">自动</button>',
         '<button data-action="check">检查</button>',
         '<button data-action="wait">等待</button>',
         '<button data-action="stop" style="grid-column:1/-1;">停止</button>',
@@ -902,6 +922,47 @@
       }
     }
 
+    function clearAutoLoopTimer() {
+      if (state.autoLoopTimer) {
+        win.clearTimeout(state.autoLoopTimer);
+        state.autoLoopTimer = null;
+      }
+    }
+
+    function setAutoLoopEnabled(enabled) {
+      ensureCurrentStores();
+      state.autoLoopEnabled = !!enabled;
+      clearAutoLoopTimer();
+      if (state.baseStore) {
+        state.baseStore.patch(function (next) {
+          next.workflow = next.workflow || {};
+          next.workflow.autoMode = !!enabled;
+          return next;
+        });
+      }
+      updateStatus(enabled ? '自动中' : (state.running ? '运行中' : '就绪'));
+    }
+
+    function resolveAutoWaitMs(snapshot) {
+      var location = snapshot && snapshot.shipInfo && snapshot.shipInfo.location;
+      return location === 'transit' ? DEFAULTS.transportWaitIntervalMs : DEFAULTS.pollIntervalMs;
+    }
+
+    function scheduleAutoLoop(waitMs) {
+      if (!state.autoLoopEnabled) {
+        return;
+      }
+      clearAutoLoopTimer();
+      state.autoLoopTimer = win.setTimeout(function () {
+        state.autoLoopTimer = null;
+        runAutoLoop().catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          log('自动模式失败：' + state.lastError);
+          setAutoLoopEnabled(false);
+        });
+      }, Math.max(1000, Number(waitMs || DEFAULTS.pollIntervalMs)));
+    }
+
     function readBaseContext() {
       var company;
       var base;
@@ -1003,6 +1064,7 @@
 
     function stop() {
       state.stopped = true;
+      setAutoLoopEnabled(false);
       pushStep('停止', '用户要求停止');
       finishRun('stopped', { reason: STOP_REASON });
     }
@@ -1105,6 +1167,94 @@
             };
           });
         });
+      });
+    }
+
+    function runSelectedChain(chain, snapshot) {
+      if (chain === 'sell_chain') {
+        startRun('sell_chain');
+        syncPanelConfig(snapshot.config);
+        renderConfig(snapshot.config);
+        return runSellChain(snapshot).then(function (result) {
+          if (result && result.next === 'wait') {
+            finishRun('waiting', { chain: 'sell_chain' });
+            return result;
+          }
+          pushStep('出货完成', (result.sold || []).length ? ('已卖出 ' + result.sold.length + ' 种物资') : '未卖出物资');
+          finishRun('success', { chain: 'sell_chain', sold: result.sold || [] });
+          return result;
+        });
+      }
+
+      if (chain === 'resupply_chain') {
+        startRun('resupply_chain');
+        syncPanelConfig(snapshot.config);
+        renderConfig(snapshot.config);
+        return runResupplyChain(snapshot).then(function (result) {
+          if (result && result.next === 'wait') {
+            finishRun('waiting', { chain: 'resupply_chain' });
+            return result;
+          }
+          pushStep('补货完成', (result.buySummary || []).length ? ('已购买 ' + result.buySummary.length + ' 种物资') : '未购买物资');
+          finishRun('success', {
+            chain: 'resupply_chain',
+            days: result && result.reduceResult ? result.reduceResult.days : null,
+            bought: result.buySummary || []
+          });
+          return result;
+        });
+      }
+
+      return Promise.resolve({ next: 'wait', snapshot: snapshot });
+    }
+
+    function runAutoLoop() {
+      if (state.running) {
+        scheduleAutoLoop(DEFAULTS.pollIntervalMs);
+        return Promise.resolve();
+      }
+
+      return readBaseContext().then(function (snapshot) {
+        var config = snapshot.config || {};
+        var workflow = config.workflow || {};
+        var nextChain = pickInitialChain(snapshot);
+        syncPanelConfig(snapshot.config);
+        renderConfig(snapshot.config);
+
+        if (!state.autoLoopEnabled && workflow.autoMode) {
+          state.autoLoopEnabled = true;
+        }
+        if (!state.autoLoopEnabled) {
+          return;
+        }
+
+        if (nextChain === 'wait') {
+          startRun('auto_wait');
+          pushStep('自动模式', '飞船位置=' + snapshot.shipInfo.location + '，继续等待');
+          finishRun('waiting', { chain: 'auto_wait', location: snapshot.shipInfo.location });
+          scheduleAutoLoop(resolveAutoWaitMs(snapshot));
+          return;
+        }
+
+        return runSelectedChain(nextChain, snapshot).then(function (result) {
+          if (!state.autoLoopEnabled) {
+            return;
+          }
+          if (result && result.next === 'wait') {
+            scheduleAutoLoop(resolveAutoWaitMs(snapshot));
+            return;
+          }
+          scheduleAutoLoop(DEFAULTS.pollIntervalMs);
+        });
+      }).catch(function (error) {
+        state.lastError = String(error && error.message ? error.message : error);
+        if (state.currentRun) {
+          pushStep('自动模式失败', state.lastError);
+          finishRun('failed', { error: state.lastError });
+        } else {
+          log('自动模式失败：' + state.lastError);
+        }
+        scheduleAutoLoop(DEFAULTS.pollIntervalMs);
       });
     }
 
@@ -1655,6 +1805,10 @@
         '</label>',
         '<div style="opacity:.7;font-size:11px;align-self:center;">超重或超预算时会自动集体缩减</div>',
         '</div>',
+        '<label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;">',
+        '<input id="gtap-auto-mode" type="checkbox"' + (((config && config.workflow && config.workflow.autoMode) || false) ? ' checked' : '') + '>',
+        '<span>启用自动模式</span>',
+        '</label>',
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">',
         '<strong style="font-size:12px;">卖货白名单</strong>',
         '<button data-config-action="add-whitelist-row" style="padding:6px 8px;">新增</button>',
@@ -1693,6 +1847,9 @@
       if (resupplyDaysInput) {
         baseConfig.resupplyDays = Math.max(1, parseInt(resupplyDaysInput.value, 10) || DEFAULTS.resupplyDays);
       }
+      var autoModeInput = doc && doc.getElementById('gtap-auto-mode');
+      baseConfig.workflow = baseConfig.workflow || {};
+      baseConfig.workflow.autoMode = !!(autoModeInput && autoModeInput.checked);
       if (whitelistRows.length) {
         baseConfig.outboundWhitelist = normalizeOutboundWhitelist(whitelistRows, materialNames);
       }
@@ -1803,18 +1960,18 @@
           return;
         }
 
+        if (action === 'auto') {
+          savePanelConfig(snapshot);
+          setAutoLoopEnabled(true);
+          startRun('auto');
+          pushStep('自动模式', '已启动自动轮询');
+          finishRun('success', { autoMode: true });
+          runAutoLoop();
+          return;
+        }
+
         if (action === 'sell') {
-          startRun('sell_chain');
-          syncPanelConfig(snapshot.config);
-          renderConfig(snapshot.config);
-          return runSellChain(snapshot).then(function (result) {
-            if (result && result.next === 'wait') {
-              finishRun('waiting', { chain: 'sell_chain' });
-              return;
-            }
-            pushStep('出货完成', (result.sold || []).length ? ('已卖出 ' + result.sold.length + ' 种物资') : '未卖出物资');
-            finishRun('success', { chain: 'sell_chain', sold: result.sold || [] });
-          }).catch(function (error) {
+          return runSelectedChain('sell_chain', snapshot).catch(function (error) {
             state.lastError = String(error && error.message ? error.message : error);
             pushStep('失败', state.lastError);
             finishRun('failed', { error: state.lastError });
@@ -1822,21 +1979,7 @@
         }
 
         if (action === 'resupply') {
-          startRun('resupply_chain');
-          syncPanelConfig(snapshot.config);
-          renderConfig(snapshot.config);
-          return runResupplyChain(snapshot).then(function (result) {
-            if (result && result.next === 'wait') {
-              finishRun('waiting', { chain: 'resupply_chain' });
-              return;
-            }
-            pushStep('补货完成', (result.buySummary || []).length ? ('已购买 ' + result.buySummary.length + ' 种物资') : '未购买物资');
-            finishRun('success', {
-              chain: 'resupply_chain',
-              days: result && result.reduceResult ? result.reduceResult.days : null,
-              bought: result.buySummary || []
-            });
-          }).catch(function (error) {
+          return runSelectedChain('resupply_chain', snapshot).catch(function (error) {
             state.lastError = String(error && error.message ? error.message : error);
             pushStep('失败', state.lastError);
             finishRun('failed', { error: state.lastError });
@@ -1865,6 +2008,10 @@
       if (apiKeyInput && config) {
         apiKeyInput.value = config.apiKey || config.wikiApiKey || DEFAULTS.wikiApiKey;
       }
+      var autoModeInput = doc.getElementById('gtap-auto-mode');
+      if (autoModeInput && config) {
+        autoModeInput.checked = !!(config.workflow && config.workflow.autoMode);
+      }
       if (config) {
         renderConfig(config);
       }
@@ -1880,12 +2027,19 @@
       next.apiKey = normalizeText(apiKeyInput && apiKeyInput.value) || DEFAULTS.wikiApiKey;
       next.wikiApiKey = next.apiKey;
       state.baseStore.write(next);
+      state.autoLoopEnabled = !!(next.workflow && next.workflow.autoMode) && state.autoLoopEnabled;
       syncPanelConfig(next);
     }
 
     function start() {
+      ensureCurrentStores();
       ensurePanel();
+      var config = state.baseStore ? state.baseStore.read() : null;
       updateStatus('就绪');
+      if (config && config.workflow && config.workflow.autoMode) {
+        setAutoLoopEnabled(true);
+        scheduleAutoLoop(DEFAULTS.pollIntervalMs);
+      }
       return api;
     }
 
@@ -1902,6 +2056,8 @@
       collectBatchFromWarehouse: collectBatchFromWarehouse,
       inferShipLocation: inferShipLocation,
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
+      resolveAutoWaitMs: resolveAutoWaitMs,
+      ensureCurrentStores: ensureCurrentStores,
       createApp: createApp,
       start: function () {
         ensurePanel();
