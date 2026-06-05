@@ -1,0 +1,8 @@
+{
+  "name": "yinhe-skill",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}
