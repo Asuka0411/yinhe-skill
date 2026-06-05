@@ -408,6 +408,122 @@
       64: 'Research Data',
       65: 'Advanced Research Data',
       66: 'Office Supplies',
+      67: 'Aeridium Ore',
+      68: 'Pipes',
+      69: 'Argon',
+      70: 'Kryon',
+      71: 'Coolant',
+      72: 'Epoxy',
+      73: 'Fission Fuel',
+      74: 'Kevlar',
+      75: 'Platinum Ore',
+      76: 'Platinum',
+      77: 'Graphene',
+      78: 'Carbon Nanotubes',
+      79: 'Aerogel',
+      80: 'Superconductors',
+      81: 'Radiation Shielding',
+      82: 'Life Support System',
+      83: 'Reinforced Glass',
+      84: 'Color Compound',
+      85: 'Spectra Modulator',
+      86: 'Mining Vehicle',
+      87: 'Drill',
+      88: 'Chicken',
+      89: 'Insulation Panels',
+      90: 'Pressure Sealant Kit',
+      91: 'Structural Elements',
+      92: 'Basic Prefab Kit',
+      93: 'Basic Amenities',
+      94: 'Advanced Construction Kit',
+      95: 'Apex Structural Elements',
+      96: 'Advanced Prefab Kit',
+      97: 'Advanced Amenities',
+      98: 'Reinforced Truss',
+      99: 'Composite Truss',
+      100: 'Advanced Drill',
+      101: 'Hydrogen Generator',
+      102: 'Control Console',
+      103: 'Ship Interior Kit',
+      104: 'Basic Hull Plate',
+      105: 'Cargo Bay Segment',
+      106: 'Fuel Tank Segment',
+      107: 'Basic Pump',
+      108: 'Welding Kit',
+      109: 'Basic FTL Emitter',
+      110: 'Hydrogen Fuel Cell',
+      111: 'Heat Shielding',
+      112: 'Advanced Circuit Board',
+      113: 'Ship Repair Kit',
+      114: 'Quadranium Hull Plate',
+      115: 'FTL Field Controller',
+      116: 'Sensor Array',
+      117: 'Cooling System',
+      118: 'Basic Ship Bridge',
+      119: 'VR Headset',
+      120: 'Composite Shielding',
+      121: 'Nanoweave Shielding',
+      122: 'Durablend',
+      123: 'Neoplast Sheet',
+      124: 'Transistor',
+      125: 'Chip',
+      126: 'Silicon Wafer',
+      127: 'Apex Research Data',
+      128: 'Honeycaps',
+      129: 'Sugar',
+      130: 'Pie',
+      131: 'Eggs',
+      132: 'Modern Prefab Kit',
+      133: 'Fission Reactor',
+      134: 'Advanced FTL Emitter',
+      135: 'Aeridium',
+      136: 'Tiridium Alloy',
+      137: 'Tiridium Hull Plate',
+      138: 'AI Core',
+      139: 'Advanced Ship Bridge',
+      140: 'Mainframe',
+      141: 'Nanopolyne',
+      142: 'Nanoweave',
+      143: 'Drone',
+      144: 'Apex Prefab Kit',
+      145: 'Cohesilite',
+      146: 'Operating System',
+      147: 'AI',
+      148: 'AI Training Data',
+      149: 'Antimatter',
+      150: 'Antimatter Reactor',
+      151: 'Antimatter Containment',
+      152: 'Hyper Coil',
+      153: 'Gourmet Rations',
+      154: 'Exotic Spices',
+      155: 'Lobster',
+      156: 'Herbs',
+      157: 'Rejuvaline',
+      158: 'Vitaqua',
+      159: 'Quadranium',
+      160: 'Superior FTL Emitter',
+      161: 'Industrial Machinery',
+      162: 'Biopolyne',
+      163: 'Nanobots',
+      164: 'Quantum Research Data',
+      165: 'Filtration System',
+      166: 'T4 Ship Bridge',
+      167: 'Neural Interface',
+      168: 'T3 Repair Kit',
+      169: 'APU',
+      170: 'Starglass',
+      171: 'T4 Ship Elements',
+      172: 'Graphenium',
+      173: 'Quantum Mainframe',
+      174: 'Field Cooling',
+      175: 'Nutrient Blend',
+      176: 'Pack Medicine',
+      177: 'Pack Food',
+      178: 'Pack Ship Parts',
+      179: 'Pack Defense',
+      180: 'Pack Habitats',
+      181: 'Pack Scientific',
+      182: 'Pack Gifts',
     };
   }
 
@@ -429,8 +545,12 @@
   }
 
   function collectOutboundBatch(base, config) {
+    return collectBatchFromWarehouse((base && base.warehouse) || null, config);
+  }
+
+  function collectBatchFromWarehouse(warehouse, config) {
     var whitelist = (config && config.outboundWhitelist) || [];
-    var byId = mapById((base && base.warehouse && base.warehouse.mats) || []);
+    var byId = mapById((warehouse && warehouse.mats) || []);
     return whitelist
       .filter(function (entry) {
         return entry && entry.enabled;
@@ -453,7 +573,11 @@
 
   function inferShipLocation(company, base) {
     var baseWarehouseId = base && base.warehouseId;
+    var basePlanetId = base && base.planetId;
+    var exchangeWarehouseId = company && company.exWhId;
     var ship = null;
+    var exchangeShip = null;
+    var transitShip = null;
     var ships = company && Array.isArray(company.ships) ? company.ships : [];
     var i;
 
@@ -467,25 +591,36 @@
         ship = ships[i];
         break;
       }
-      if (ships[i].baseId && base && Number(ships[i].baseId) === Number(base.id)) {
+      if (basePlanetId != null && Number(ships[i].pId) === Number(basePlanetId)) {
         ship = ships[i];
         break;
       }
-      if (ships[i].location && /exchange/i.test(String(ships[i].location))) {
-        ship = ships[i];
+      if (exchangeWarehouseId != null && Number(ships[i].warehouseId) === Number(exchangeWarehouseId)) {
+        exchangeShip = exchangeShip || ships[i];
+        continue;
+      }
+      if (ships[i].flight) {
+        transitShip = transitShip || ships[i];
       }
     }
 
+    if (ship === ships[0]) {
+      ship = exchangeShip || transitShip || ship;
+    }
+
+    if (ship && ship.flight && ship.flight.aDate) {
+      return { location: 'transit', ship: ship };
+    }
     if (ship && baseWarehouseId != null && Number(ship.warehouseId) === Number(baseWarehouseId)) {
       return { location: 'base', ship: ship };
     }
-    if (ship && ship.location && /exchange/i.test(String(ship.location))) {
+    if (ship && basePlanetId != null && Number(ship.pId) === Number(basePlanetId)) {
+      return { location: 'base', ship: ship };
+    }
+    if (ship && exchangeWarehouseId != null && Number(ship.warehouseId) === Number(exchangeWarehouseId)) {
       return { location: 'exchange', ship: ship };
     }
-    if (ship && ship.status && /transit|travel/i.test(String(ship.status))) {
-      return { location: 'transit', ship: ship };
-    }
-    if (ship && ship.destination && /exchange/i.test(String(ship.destination))) {
+    if (ship && ship.flight) {
       return { location: 'transit', ship: ship };
     }
     return { location: 'unknown', ship: ship };
@@ -770,6 +905,7 @@
     function readBaseContext() {
       var company;
       var base;
+      var exchangeWarehouse;
       var snapshot;
       var baseId;
       var baseConfig;
@@ -786,17 +922,24 @@
         state.historyStore = stores.historyStore;
         baseConfig = state.baseStore.read();
         return api.request('getPrices').then(function (prices) {
-          snapshot = {
-            capturedAt: new Date().toISOString(),
-            location: win.location.href,
-            company: company,
-            base: base,
-            prices: prices || [],
-            config: baseConfig,
-            shipInfo: inferShipLocation(company, base || {}),
-          };
-          state.lastSnapshot = snapshot;
-          return snapshot;
+          var exchangePromise = company && company.exWhId ? api.request('getWarehouse', { warehouseId: company.exWhId }).catch(function () {
+            return null;
+          }) : Promise.resolve(null);
+          return exchangePromise.then(function (exchangeWarehouseData) {
+            exchangeWarehouse = exchangeWarehouseData;
+            snapshot = {
+              capturedAt: new Date().toISOString(),
+              location: win.location.href,
+              company: company,
+              base: base,
+              prices: prices || [],
+              exchangeWarehouse: exchangeWarehouse,
+              config: baseConfig,
+              shipInfo: inferShipLocation(company, base || {}),
+            };
+            state.lastSnapshot = snapshot;
+            return snapshot;
+          });
         });
       });
     }
@@ -873,6 +1016,7 @@
       var base = snapshot.base || {};
       var config = snapshot.config || (state.baseStore ? state.baseStore.defaults : deepClone(DEFAULTS));
       var batch = collectOutboundBatch(base, config);
+      var exchangeBatch = collectBatchFromWarehouse(snapshot.exchangeWarehouse, config);
 
       pushStep('出货链', '位置=' + shipInfo.location);
       if (!shipInfo.ship) {
@@ -885,23 +1029,38 @@
       }
 
       if (shipInfo.location !== 'base') {
+        if (shipInfo.location === 'exchange') {
+          pushStep('交易所库存', exchangeBatch.length ? exchangeBatch.map(function (item) { return item.name + ' x ' + item.current; }).join('，') : '无');
+          if (!exchangeBatch.length) {
+            return Promise.resolve({ next: 'done', sold: [] });
+          }
+          return navigateToExchangePage().then(function () {
+            return sellBatchOnExchange(exchangeBatch);
+          }).then(function (sellSummary) {
+            return {
+              next: 'done',
+              batch: exchangeBatch,
+              sold: sellSummary,
+              ship: shipInfo.ship,
+            };
+          });
+        }
         pushStep('跳过出货', '飞船不在基地');
         return Promise.resolve({ next: 'wait', snapshot: snapshot });
       }
 
       pushStep('待出货物资', batch.length ? batch.map(function (item) { return item.name + ' x ' + item.current; }).join('，') : '无');
+      if (!batch.length) {
+        return Promise.resolve({ next: 'done', sold: [] });
+      }
       return navigateToBaseAndOpenWarehouse().then(function () {
         pushStep('页面', '已切到基地仓库');
         return moveShipToDestination(shipInfo.ship, 'Exchange Station').then(function () {
           pushStep('运输', '已尝试发船到交易所');
-          return navigateToExchangePage();
-        }).then(function () {
-          return sellBatchOnExchange(batch);
-        }).then(function (sellSummary) {
           return {
-            next: 'done',
+            next: 'wait',
             batch: batch,
-            sold: sellSummary,
+            sold: [],
             ship: shipInfo.ship,
           };
         });
@@ -951,7 +1110,7 @@
 
     function buildResupplyWishlist(base, config) {
       if (doc) {
-        return buildResupplyWishlistFromUi(config).catch(function () {
+        return buildResupplyWishlistFromUi(base, config).catch(function () {
           return buildResupplyWishlistFromEstimate(base, config);
         });
       }
@@ -999,9 +1158,9 @@
       });
     }
 
-    function buildResupplyWishlistFromUi(config) {
+    function buildResupplyWishlistFromUi(base, config) {
       var targetDays = Number(config.resupplyDays || DEFAULTS.resupplyDays);
-      return rebuildWishlistAtDays(targetDays).then(function (firstPass) {
+      return rebuildWishlistAtDays(base, targetDays).then(function (firstPass) {
         var reduceResult = reduceResupplyDays({
           targetDays: targetDays,
           maxDays: targetDays,
@@ -1030,7 +1189,7 @@
           };
         }
 
-        return rebuildWishlistAtDays(reduceResult.days).then(function (nextPass) {
+        return rebuildWishlistAtDays(base, reduceResult.days).then(function (nextPass) {
           return {
             reduceResult: {
               days: reduceResult.days,
@@ -1056,7 +1215,7 @@
       return { weight: weight, price: price };
     }
 
-    function rebuildWishlistAtDays(days) {
+    function rebuildWishlistAtDays(base, days) {
       pushStep('补货天数', String(days));
       applyResupplyDays(days);
       return wait(500)
@@ -1072,39 +1231,66 @@
         .then(function () {
           return wait(500);
         })
-        .then(readResupplyRowsFromPage);
+        .then(function () {
+          return readResupplyRows(base);
+        });
     }
 
-    function readResupplyRowsFromPage() {
-      if (!doc) {
-        return Promise.resolve({ weight: 0, price: 0, rows: [] });
-      }
-      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr')).map(function (row) {
-        var cells = Array.prototype.slice.call(row.querySelectorAll('td'));
-        if (cells.length < 6) {
-          return null;
-        }
-        var name = normalizeText(cells[0].textContent);
-        var resupply = parseNumber(cells[3].textContent, 0);
-        var weight = parseNumber(cells[4].textContent, 0);
-        var cost = parseNumber(cells[5].textContent, 0);
-        if (!name || !resupply) {
-          return null;
-        }
-        return {
-          id: 0,
-          name: name,
-          amount: resupply,
-          weight: weight,
-          cost: cost,
-        };
-      }).filter(Boolean);
-
+    function readResupplyRows(base) {
       var totals = readResupplyTotalsFromPage();
-      return Promise.resolve({
-        weight: totals.weight,
-        price: totals.price,
-        rows: rows,
+      return readWishlistRowsFromApi(base).then(function (rows) {
+        return {
+          weight: totals.weight,
+          price: totals.price,
+          rows: rows,
+        };
+      });
+    }
+
+    function resolveWishlistIdForBase(base) {
+      var directPlanetId = Number((base && (base.planetId || base.pId || (base.planet && base.planet.id))) || 0);
+      if (directPlanetId > 0) {
+        return Promise.resolve(directPlanetId);
+      }
+      return api.request('getWishlists').then(function (wishlists) {
+        var list = Array.isArray(wishlists) ? wishlists : [];
+        var baseName = normalizeText(base && base.name);
+        var match = list.find(function (item) {
+          return normalizeText(item && item.title).indexOf(baseName) >= 0;
+        });
+        return match ? Number(match.id) : 0;
+      }).catch(function () {
+        return 0;
+      });
+    }
+
+    function readWishlistRowsFromApi(base) {
+      return resolveWishlistIdForBase(base).then(function (wishlistId) {
+        if (!wishlistId) {
+          return [];
+        }
+        return api.request('getWishlist', { wishlistId: wishlistId }).then(function (wishlist) {
+          var mats = Array.isArray(wishlist && wishlist.mats) ? wishlist.mats : [];
+          var pricesById = mapById((state.lastSnapshot && state.lastSnapshot.prices) || []);
+          return mats.map(function (item) {
+            var id = Number(item.matId || item.id || item.i || 0);
+            var amount = Number(item.amount || item.am || item.a || 0);
+            var price = pricesById.get(id) || {};
+            var unitPrice = Number(price.price || price.sellPrice || price.buyPrice || price.avgPrice || 0);
+            if (!id || !amount) {
+              return null;
+            }
+            return {
+              id: id,
+              name: materialNames[id] || ('Material ' + id),
+              amount: amount,
+              weight: 0,
+              cost: amount * unitPrice,
+            };
+          }).filter(Boolean);
+        });
+      }).catch(function () {
+        return [];
       });
     }
 
@@ -1713,6 +1899,8 @@
       createHistoryStore: createHistoryStore,
       createApiClient: createApiClient,
       collectOutboundBatch: collectOutboundBatch,
+      collectBatchFromWarehouse: collectBatchFromWarehouse,
+      inferShipLocation: inferShipLocation,
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
       createApp: createApp,
       start: function () {

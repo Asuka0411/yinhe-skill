@@ -107,3 +107,48 @@ test('normalizeOutboundWhitelist 会去重、过滤非法项并补全名称', ()
     }
   ]);
 });
+
+test('collectBatchFromWarehouse 可从任意仓库按白名单生成批次', () => {
+  const api = createGtAutopilot();
+  const batch = api.collectBatchFromWarehouse(
+    {
+      mats: [
+        { id: 172, am: 6 },
+        { id: 136, am: 10 }
+      ]
+    },
+    {
+      outboundWhitelist: [
+        { id: 172, enabled: true, minAmount: 5, name: 'Graphenium' },
+        { id: 136, enabled: true, minAmount: 12, name: 'Tiridium Alloy' }
+      ]
+    }
+  );
+
+  assert.deepEqual(batch, [
+    {
+      id: 172,
+      name: 'Graphenium',
+      current: 6,
+      minAmount: 5,
+      canSend: true
+    }
+  ]);
+});
+
+test('inferShipLocation 会根据仓库、星球与 flight 判断位置', () => {
+  const api = createGtAutopilot();
+  const base = { id: 9, warehouseId: 101, planetId: 501 };
+  const company = {
+    exWhId: 202,
+    ships: [
+      { id: 1, warehouseId: 202, pId: 999 },
+      { id: 2, warehouseId: 101, pId: 501 },
+      { id: 3, warehouseId: 0, pId: 0, flight: { aDate: '2026-06-05T12:00:00Z' } }
+    ]
+  };
+
+  assert.equal(api.inferShipLocation(company, base).location, 'base');
+  assert.equal(api.inferShipLocation({ exWhId: 202, ships: [{ id: 1, warehouseId: 202, pId: 999 }] }, base).location, 'exchange');
+  assert.equal(api.inferShipLocation({ exWhId: 202, ships: [{ id: 3, warehouseId: 0, pId: 0, flight: { aDate: '2026-06-05T12:00:00Z' } }] }, base).location, 'transit');
+});
