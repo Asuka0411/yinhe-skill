@@ -1,334 +1,334 @@
-# Galactic Tycoons Autopilot Design
+# Galactic Tycoons 自动脚本设计
 
-Date: 2026-06-05
+日期：2026-06-05
 
-## Goal
+## 目标
 
-Build a stable, fast userscript for a single base and a single ship that supports both outbound selling and inbound resupply through fixed operational flows backed by a lightweight state machine.
+构建一个稳定、快速的用户脚本，面向单基地、单飞船场景，支持固定流程的出货与补货，并由轻量状态机驱动执行。
 
-The first version is intentionally narrow:
-- One base at a time
-- One ship reused for both directions
-- Two fixed chains: outbound selling and inbound resupply
-- Manual buttons for direct control
-- Auto mode for wait-and-resume behavior
+第一版明确收敛范围：
+- 一次只处理一个基地
+- 同一艘飞船负责双向运输
+- 仅支持两条固定链路：出货链、补货链
+- 提供手动按钮直接控制
+- 提供自动模式用于等待后续跑
 
-## Product Direction
+## 产品方向
 
-The script is not a generic workflow builder in v1. The user wants fixed flows that run reliably and quickly. To keep future extension open, the implementation should use a lightweight step/state model internally, but expose only explicit built-in actions and built-in chain templates.
+第一版不是通用工作流编排器。当前目标是把固定流程做稳、做快。为了给后续扩展留空间，底层实现采用轻量的步骤 / 状态模型，但对外只暴露明确的内置动作和内置链路模板。
 
-## User Model
+## 用户模型
 
-The user operates one configured base at a time and wants to:
-- Run outbound selling when the ship is at the base
-- Run inbound resupply when the ship is at the exchange
-- Let auto mode continue after transport waits
-- Use the game's own UI and built-in resupply behavior instead of replacing game logic with custom calculations
+用户按单基地使用脚本，并希望做到：
+- 飞船在基地时执行出货销售
+- 飞船在交易所时执行补货回运
+- 运输过程中允许自动模式继续等待并恢复执行
+- 尽量复用游戏自己的界面和 `Resupply` 内置逻辑，而不是由脚本自行计算所有缺料数量
 
-## Supported Flows
+## 支持的流程
 
-### Outbound Selling Chain
+### 出货链
 
-Intent:
-- Move selected finished goods from base to exchange
-- Sell them through the exchange UI
+目的：
+- 将指定产物从基地运到交易所
+- 在交易所通过游戏界面完成卖出
 
-Flow:
-1. Confirm current base context
-2. Confirm ship exists and is usable for outbound work
-3. Open base-side outbound workflow
-4. Select sellable materials from script-managed whitelist
-5. Apply per-material outbound rule
-6. Launch transport from base to exchange
-7. In manual mode, stop when long transport wait begins
-8. In auto mode, poll until arrival and continue
-9. Open exchange sell workflow
-10. Sell all configured whitelist materials through game UI
-11. Record summary and step history
+流程：
+1. 确认当前基地上下文
+2. 确认飞船存在且可用于出货
+3. 打开基地侧出货流程
+4. 从脚本维护的白名单中选择可出货物资
+5. 应用每种物资的出货规则
+6. 从基地发船到交易所
+7. 手动模式下，进入长时间运输等待时结束本轮
+8. 自动模式下，轮询直到到站并继续
+9. 打开交易所卖货流程
+10. 通过游戏界面卖出所有配置中的白名单物资
+11. 记录摘要与步骤历史
 
-### Inbound Resupply Chain
+### 补货链
 
-Intent:
-- Use the game's built-in resupply page to calculate shortages
-- Convert shortages into wishlist items
-- Buy them at exchange
-- Bring them back to the base
+目的：
+- 使用游戏内置 `Resupply` 页面计算缺口
+- 将缺口转成 `wishlist`
+- 在交易所完成采购
+- 再把采购物资运回基地
 
-Flow:
-1. Confirm current base context
-2. Confirm ship exists and is usable for inbound work
-3. Open `Base -> Resupply`
-4. Set target resupply days
-5. Clear the base-bound default wishlist
-6. Select all materials on the current resupply page
-7. Trigger the game's `Add to Wishlist`
-8. Read wishlist totals
-9. If total price or weight exceeds limits, reduce resupply days and rebuild wishlist
-10. Navigate to exchange
-11. Buy the rebuilt wishlist through game UI
-12. Load bought goods onto the ship
-13. Launch transport from exchange back to base
-14. In manual mode, stop when long transport wait begins
-15. In auto mode, poll until arrival and continue
-16. Unload at base
-17. Record summary and step history
+流程：
+1. 确认当前基地上下文
+2. 确认飞船存在且可用于补货
+3. 打开 `Base -> Resupply`
+4. 设置目标补齐天数
+5. 清空当前基地绑定的默认 `wishlist`
+6. 勾选当前 `Resupply` 页面的全部物资
+7. 触发游戏内置 `Add to Wishlist`
+8. 读取 `wishlist` 汇总结果
+9. 如果总价或总重超限，则下调补齐天数并重建 `wishlist`
+10. 导航到交易所
+11. 通过游戏界面购买重建后的 `wishlist`
+12. 将采购结果装船
+13. 从交易所发船回基地
+14. 手动模式下，进入长时间运输等待时结束本轮
+15. 自动模式下，轮询直到到站并继续
+16. 回基地卸货
+17. 记录摘要与步骤历史
 
-## Execution Modes
+## 执行模式
 
-### Manual Mode
+### 手动模式
 
-Manual mode exposes explicit buttons:
-- Sell
-- Resupply
-- Check
-- Wait
-- Stop
+手动模式提供明确的按钮：
+- 卖货
+- 补货
+- 检查
+- 等待
+- 停止
 
-Behavior:
-- The user can choose either chain directly
-- Long transport waits do not block forever
-- When transport starts, the run can end with a recorded "waiting for arrival" state
-- The next manual action can resume from the new ship position
+行为规则：
+- 用户可以直接选择要跑哪条链
+- 长运输等待不会无限阻塞当前操作
+- 当运输开始后，本轮可以以“等待到站”状态结束
+- 用户下次手动触发时，可根据新的飞船位置继续后续动作
 
-### Auto Mode
+### 自动模式
 
-Auto mode uses the same step engine but adds continuation behavior:
-- Read ship location
-- If ship is at base, prefer outbound selling first
-- If ship is at exchange, prefer inbound resupply first
-- If ship is in transit or unavailable, keep polling
-- When the ship arrives, resume the next valid chain step
-- Continue until the current chain is complete or a critical failure stops the run
+自动模式复用同一套步骤引擎，但增加续跑能力：
+- 读取飞船位置
+- 如果飞船在基地，优先执行出货链
+- 如果飞船在交易所，优先执行补货链
+- 如果飞船在运输中或暂不可操作，则继续轮询
+- 当飞船到站后，恢复下一步有效链路
+- 持续执行，直到当前链路完成或关键错误终止本轮
 
-## Internal Architecture
+## 内部架构
 
-### State Machine
+### 状态机
 
-The script should internally model execution as explicit states rather than loose async functions.
+脚本内部应以显式状态建模执行过程，而不是仅靠松散的异步函数串接。
 
-Representative state groups:
-- Context acquisition
-- Ship readiness
-- Page navigation
-- Resupply wishlist preparation
-- Budget and capacity validation
-- Exchange buying
-- Base-to-exchange transport
-- Exchange-to-base transport
-- Exchange selling
-- Wait and resume
-- Success
-- Failure
-- Stopped
+代表性状态组：
+- 上下文获取
+- 飞船就绪检查
+- 页面导航
+- 补货 `wishlist` 准备
+- 预算与载重校验
+- 交易所购买
+- 基地到交易所运输
+- 交易所到基地运输
+- 交易所卖货
+- 等待与恢复
+- 成功
+- 失败
+- 已停止
 
-Each state should:
-- declare its preconditions
-- declare its success condition
-- return the next state explicitly
-- emit structured history entries
+每个状态都应具备：
+- 明确前置条件
+- 明确成功条件
+- 显式返回下一状态
+- 产出结构化步骤历史
 
-### Step Executor
+### 步骤执行器
 
-A chain is a known ordered list of states.
+每条链都是一组已知顺序的状态。
 
-Two chain templates are needed:
+第一版只需要两条链模板：
 - `sell_chain`
 - `resupply_chain`
 
-The executor should support:
-- start from first step
-- resume from stored wait state
-- stop on user command
-- stop on critical failure
-- continue past non-critical failure when allowed
+执行器需要支持：
+- 从首步启动
+- 从等待态恢复
+- 响应用户停止
+- 在关键失败时终止
+- 在允许时越过非关键失败继续
 
-### UI Adapter
+### UI 适配层
 
-The automation should separate state reading from action execution.
+自动化层需要把“读状态”和“执行动作”拆开。
 
-Read-side:
-- Prefer Local API or stable page data when available
-- Use page parsing only when structured data is unavailable
+读侧：
+- 优先使用 `Local API` 或稳定页面数据
+- 只有在结构化数据不可用时才退回 DOM 解析
 
-Write-side:
-- Use the game's visible buttons and built-in UI flows for user-equivalent actions
-- Avoid inventing custom quantity calculations where the game already provides them
+写侧：
+- 尽量使用游戏本身可见按钮和内置流程
+- 游戏已有数量计算逻辑时，脚本不重复发明
 
-## Configuration Model
+## 配置模型
 
-Configuration is stored per base.
+配置按基地保存。
 
-V1 base configuration:
-- outbound whitelist
-- per-material minimum outbound amount
-- default resupply days
+第一版基地级配置包括：
+- 出货白名单
+- 每种物资的最小出货量
+- 默认补齐天数
 
-No generic workflow editor is included in v1.
+第一版不提供通用工作流编辑器。
 
-## Resupply Limit Logic
+## 补货超限处理
 
-Resupply should use the game's own calculation instead of custom shortage math.
+补货必须复用游戏的 `Resupply` 计算结果，而不是脚本自算缺料。
 
-The script should:
-1. open the current base resupply page
-2. apply target days
-3. clear the default wishlist tied to this base
-4. select all rows on the page
-5. add all rows to wishlist
-6. inspect resulting total price and total weight
+脚本应执行：
+1. 打开当前基地的 `Resupply` 页面
+2. 应用目标补齐天数
+3. 清空当前基地绑定的默认 `wishlist`
+4. 勾选页面全部条目
+5. 将全部条目加入 `wishlist`
+6. 读取生成后的总价与总重
 
-Constraints:
-- total weight must fit the ship's usable cargo capacity
-- total price must be affordable with current available credits
+约束条件：
+- 总重量必须落在飞船可用载重范围内
+- 总价格必须在当前可支付资金范围内
 
-If limits are exceeded:
-1. estimate a reduced resupply days value proportionally
-2. rerun wishlist generation
-3. fine-tune downward one day at a time
-4. stop once both weight and price fit
-5. fail the run if the days value reaches an unusable floor and still does not fit
+如果超限：
+1. 先按比例估算更低的补齐天数
+2. 重新生成 `wishlist`
+3. 再按天数逐步向下微调
+4. 直到重量与价格都满足约束
+5. 如果已经降到不可用下限仍不满足，则本轮失败
 
-## Outbound Material Rules
+## 出货规则
 
-Outbound selling is restricted to user-selected whitelist materials shown in the script panel.
+出货只针对用户在面板中勾选的白名单物资。
 
-For each material, v1 must support:
-- enabled or disabled
-- minimum outbound amount
+第一版每种物资至少支持：
+- 启用 / 禁用
+- 最小出货量
 
-V1 outbound behavior:
-- if material is not enabled, skip it
-- if current amount is below minimum outbound amount, skip it
-- otherwise include it in the outbound batch
+第一版出货行为：
+- 未启用则跳过
+- 当前库存低于最小出货量则跳过
+- 否则加入本轮出货批次
 
-V1 does not need stock-reserve logic because the user explicitly wants whitelist-only finished goods handling.
+第一版不做保底库存逻辑，因为当前需求明确是对白名单终产物出货。
 
-## Wishlist Handling
+## Wishlist 处理规则
 
-The script should not create its own wishlist ownership model if the game already binds wishlist behavior to the current base or planet context.
+如果游戏本身已经把 `wishlist` 与当前基地或星球上下文绑定，脚本不应再发明新的归属模型。
 
-V1 wishlist rules:
-- use the game's default base-related wishlist target
-- always clear the target wishlist before generating a new resupply batch
-- never append old entries from prior runs
+第一版 `wishlist` 规则：
+- 直接使用游戏默认的基地相关 `wishlist`
+- 每次生成新补货单前必须先清空目标 `wishlist`
+- 不保留上一轮残留条目，不做追加
 
-## Ship Readiness Rules
+## 飞船就绪规则
 
-The script must distinguish outbound and inbound logistics by location.
+脚本必须区分出货与补货两种方向不同的物流。
 
-Outbound path:
-- source is base
-- destination is exchange
+出货路径：
+- 来源：基地
+- 目标：交易所
 
-Inbound path:
-- source is exchange
-- destination is base
+补货路径：
+- 来源：交易所
+- 目标：基地
 
-Because v1 uses one shared ship, chain choice depends on current ship position:
-- ship at base: outbound selling is the natural first chain
-- ship at exchange: inbound resupply is the natural first chain
-- ship in transit: only wait/check behavior is valid
+由于第一版只使用一艘共享飞船，链路优先级由飞船位置决定：
+- 飞船在基地：优先跑出货链
+- 飞船在交易所：优先跑补货链
+- 飞船在运输中：只允许执行等待 / 检查行为
 
-## Error Handling
+## 错误处理
 
-Failures are graded.
+错误按等级处理。
 
-Critical failures:
-- base context cannot be resolved
-- ship cannot be identified
-- navigation target cannot be reached
-- transport cannot be started
-- wishlist cannot be rebuilt into a valid affordable/loadable state
-- required confirmation action cannot be found after retries
+关键错误：
+- 无法解析当前基地上下文
+- 无法识别目标飞船
+- 无法进入目标页面
+- 无法成功发起运输
+- `wishlist` 无法被重建到可购买、可装载状态
+- 关键确认按钮在重试后仍找不到
 
-Critical failure behavior:
-- stop current run
-- write failure summary
-- store step where failure occurred
+关键错误处理：
+- 终止当前运行
+- 写入失败摘要
+- 记录失败发生的步骤
 
-Non-critical failures:
-- one material cannot be sold
-- one wishlist item cannot be bought
-- optional page details cannot be parsed
+非关键错误：
+- 某一个物资卖不出去
+- 某一个 `wishlist` 条目买不到
+- 某些可选页面信息解析失败
 
-Non-critical failure behavior:
-- log the failure
-- continue when remaining chain steps are still valid
+非关键错误处理：
+- 写入错误日志
+- 只要剩余链路仍然成立，就继续执行
 
-Retries:
-- finite retries per UI action
-- retries should be bounded and visible in history
+重试规则：
+- 每个 UI 动作只允许有限次重试
+- 重试次数必须在历史记录中可见
 
-## Runtime History
+## 运行历史
 
-Keep recent run history per base.
+按基地保存最近的运行历史。
 
-Each history record should include:
-- run id
-- mode: manual or auto
-- selected chain
-- start time
-- end time
-- final status
-- summary counts and totals
-- step-by-step detail entries
+每条历史记录包含：
+- 运行 ID
+- 模式：手动或自动
+- 所选链路
+- 开始时间
+- 结束时间
+- 最终状态
+- 摘要计数与汇总
+- 逐步骤详情
 
-The UI should show:
-- compact summary list by default
-- expandable detail for each run
+界面展示要求：
+- 默认展示紧凑摘要列表
+- 每条记录支持展开查看详细步骤
 
-## Panel Design
+## 面板设计
 
-The panel remains button-oriented.
+面板保持按钮式操作。
 
-Primary controls:
-- Sell
-- Resupply
-- Check
-- Wait
-- Stop
+主要控制项：
+- 卖货
+- 补货
+- 检查
+- 等待
+- 停止
 
-Panel responsibilities:
-- show active base
-- show ship location/status
-- allow outbound whitelist selection
-- allow per-material minimum outbound amount edits
-- allow default resupply days edits
-- show current run status
-- show recent history summaries
+面板职责：
+- 显示当前基地
+- 显示飞船位置与状态
+- 提供出货白名单选择
+- 提供每种物资的最小出货量编辑
+- 提供默认补齐天数编辑
+- 显示当前运行状态
+- 显示最近运行历史摘要
 
-## Testing and Verification
+## 测试与验证
 
-V1 verification should focus on repeatability, not only happy-path execution.
+第一版验证重点是可重复性，而不只是 happy path。
 
-Minimum checks:
-- manual sell chain from ship-at-base state
-- manual resupply chain from ship-at-exchange state
-- auto mode continuation through one transport wait
-- wishlist clear-and-rebuild behavior
-- resupply day reduction when weight exceeds capacity
-- resupply day reduction when total price exceeds current funds
-- stop action during active run
-- history entry generation for success, wait, stop, and failure
+最低验证项：
+- 飞船在基地时，手动跑通出货链
+- 飞船在交易所时，手动跑通补货链
+- 自动模式跨越一次运输等待后继续执行
+- `wishlist` 清空并重建流程正确
+- 载重超限时，补齐天数能正确下调
+- 资金不足时，补齐天数能正确下调
+- 运行中点击停止可立即生效
+- 成功、等待、停止、失败四类状态都能生成历史记录
 
-## Out of Scope for V1
+## 第一版范围外
 
-- Multi-base scheduling
-- Multiple ships per base
-- Generic workflow editor
-- Dynamic reserve-stock logic
-- Market-price optimization
-- Exportable report formats
-- Full direct backend-action replication in place of game UI
+- 多基地调度
+- 单基地多飞船
+- 通用工作流编辑器
+- 动态保底库存逻辑
+- 基于市场价格的优化卖货
+- 可导出的报表格式
+- 用私有后端动作完全替代游戏界面
 
-## Recommended Implementation Shape
+## 推荐的实现拆分
 
-Split future code into focused units:
-- state and chain definitions
-- page and Local API readers
-- UI action helpers
-- per-base config storage
-- run history storage
-- control panel rendering
+后续代码建议拆成职责清晰的模块：
+- 状态与链路定义
+- 页面与 `Local API` 读取器
+- UI 动作辅助函数
+- 基地配置存储
+- 运行历史存储
+- 控制面板渲染
 
-This keeps the script understandable and makes later extension to additional fixed chains practical without turning one userscript file into an opaque monolith.
+这样可以避免用户脚本文件继续膨胀成难以维护的单体结构，同时也为后续新增固定链路保留扩展空间。

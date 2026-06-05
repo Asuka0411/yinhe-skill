@@ -1,7 +1,7 @@
 # yinhe-skill
 
-Private repository for the current Galactic Tycoons userscript workspace.
+当前 Galactic Tycoons 用户脚本工作区的私有仓库。
 
-## Structure
+## 目录结构
 
-- `references/`: reference scripts and notes
+- `references/`：参考脚本与参考记录
