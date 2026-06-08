@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.21
+// @version      0.1.22
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.21';
+  var APP_VERSION = '0.1.22';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -70,6 +70,19 @@
     { action: 'repair_ship', label: '一键修飞船' },
     { action: 'repair_base_buildings', label: '一键修基地建筑' },
     { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' },
+  ];
+  var WISHLIST_RESUPPLY_ATOMIC_STEPS = [
+    { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'pending' },
+    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'pending' },
+    { action: 'wishlist_check_ship_at_exchange', label: '检查飞船在交易所', status: 'pending' },
+    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'pending' },
+    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'pending' },
+    { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
+    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'pending' },
+    { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'pending' },
+    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'pending' },
+    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'pending' },
+    { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'pending' },
   ];
   var SHIP_SUPPORT_MATERIALS = [
     { id: 149, name: 'Antimatter', targetAmount: 2000, role: 'fuel' },
@@ -117,11 +130,20 @@
     return deepClone(ATOMIC_ACTIONS);
   }
 
+  function getWishlistResupplyAtomicSteps() {
+    return deepClone(WISHLIST_RESUPPLY_ATOMIC_STEPS);
+  }
+
   function findAtomicAction(action) {
     var name = normalizeText(action);
     for (var i = 0; i < ATOMIC_ACTIONS.length; i += 1) {
       if (ATOMIC_ACTIONS[i].action === name) {
         return ATOMIC_ACTIONS[i];
+      }
+    }
+    for (var j = 0; j < WISHLIST_RESUPPLY_ATOMIC_STEPS.length; j += 1) {
+      if (WISHLIST_RESUPPLY_ATOMIC_STEPS[j].action === name) {
+        return WISHLIST_RESUPPLY_ATOMIC_STEPS[j];
       }
     }
     return null;
@@ -1159,6 +1181,36 @@
       }
     }
 
+    function buildWishlistResupplyStepsHtml() {
+      return [
+        '<div data-wishlist-resupply-steps style="display:grid;grid-template-columns:1fr;gap:6px;">',
+        '<div style="opacity:.78;line-height:1.45;">补货回运流程拆分测试。当前阶段只验证按钮入口，不执行真实购买、装船或发船。</div>',
+        WISHLIST_RESUPPLY_ATOMIC_STEPS.map(function (step, index) {
+          var status = step.status || 'pending';
+          var statusText = status === 'done' ? '已验证' : (status === 'ready' ? '可测试' : '待接入');
+          var stepNo = String(index + 1).padStart(2, '0');
+          return [
+            '<div data-wishlist-resupply-step="' + escapeHtml(step.action) + '" style="display:grid;grid-template-columns:34px 1fr 54px;gap:6px;align-items:center;">',
+            '<span style="opacity:.62;font-variant-numeric:tabular-nums;">' + escapeHtml(stepNo) + '</span>',
+            '<button data-atomic-action="' + escapeHtml(step.action) + '" data-atomic-status="' + escapeHtml(status) + '" title="' + escapeHtml(statusText) + '">' + escapeHtml(step.label) + '</button>',
+            '<span style="font-size:11px;opacity:.68;text-align:right;">' + escapeHtml(statusText) + '</span>',
+            '</div>'
+          ].join('');
+        }).join(''),
+        '</div>'
+      ].join('');
+    }
+
+    function buildAtomicConfigPanelHtml(entry) {
+      if (entry.action === 'sell_exchange_inventory') {
+        return '<div id="gtap-sell-config"></div>';
+      }
+      if (entry.action === 'buy_wishlist') {
+        return buildWishlistResupplyStepsHtml();
+      }
+      return '<div style="opacity:.72;">该功能待接入，暂无配置。</div>';
+    }
+
     function buildAtomicActionRowHtml(entry) {
       var done = entry.status === 'done';
       var style = done
@@ -1171,9 +1223,7 @@
         '<button data-atomic-action="' + escapeHtml(entry.action) + '" data-atomic-status="' + escapeHtml(entry.status || 'pending') + '" title="' + escapeHtml(title) + '" style="' + style + '">' + escapeHtml(entry.label) + '</button>',
         '<button data-atomic-config-toggle="' + escapeHtml(entry.action) + '" style="padding:6px 8px;">' + (expanded ? '收起' : '展开') + '</button>',
         '<div data-atomic-config-panel="' + escapeHtml(entry.action) + '" style="grid-column:1/-1;display:' + (expanded ? 'block' : 'none') + ';margin:2px 0 4px 0;padding:8px;border-radius:9px;background:rgba(0,0,0,0.16);border:1px solid rgba(255,255,255,0.08);">',
-        entry.action === 'sell_exchange_inventory'
-          ? '<div id="gtap-sell-config"></div>'
-          : '<div style="opacity:.72;">该功能待接入，暂无配置。</div>',
+        buildAtomicConfigPanelHtml(entry),
         '</div>',
         '</div>'
       ].join('');
@@ -3332,6 +3382,7 @@
       pickInitialChain: pickInitialChain,
       reduceResupplyDays: reduceResupplyDays,
       getAtomicActions: getAtomicActions,
+      getWishlistResupplyAtomicSteps: getWishlistResupplyAtomicSteps,
       runAtomicAction: runAtomicAction,
       getShipSupportMaterials: getShipSupportMaterials,
       planShipSupportMaterialRestock: planShipSupportMaterialRestock,
