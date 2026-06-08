@@ -521,7 +521,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.24');
+  assert.equal(api.version, '0.1.25');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -634,14 +634,14 @@ test('补货回运原子步骤定义按真实流程排序', () => {
     { action: 'wishlist_open_exchange', label: '打开交易所', status: 'ready' },
     { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
     { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'ready' },
-    { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'pending' },
-    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'pending' },
-    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'pending' },
-    { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'pending' }
+    { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'ready' },
+    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'ready' },
+    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'ready' },
+    { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'ready' }
   ]);
 });
 
-test('清空、创建、打开交易所和购买原子步骤标记为可测试', () => {
+test('清空、创建、打开交易所、购买、转移、补油修理和发船原子步骤标记为可测试', () => {
   const api = createGtAutopilot();
   const steps = api.getWishlistResupplyAtomicSteps();
   const byAction = Object.fromEntries(steps.map((entry) => [entry.action, entry.status]));
@@ -650,6 +650,10 @@ test('清空、创建、打开交易所和购买原子步骤标记为可测试',
   assert.equal(byAction.wishlist_create_resupply_wishlist, 'ready');
   assert.equal(byAction.wishlist_open_exchange, 'ready');
   assert.equal(byAction.wishlist_buy_wishlist, 'ready');
+  assert.equal(byAction.wishlist_transfer_to_ship, 'ready');
+  assert.equal(byAction.wishlist_fuel_ship, 'ready');
+  assert.equal(byAction.wishlist_repair_ship, 'ready');
+  assert.equal(byAction.wishlist_send_ship_home, 'ready');
 });
 
 test('补货回运原子步骤按钮当前返回待接入状态', () => {
@@ -663,7 +667,7 @@ test('补货回运原子步骤按钮当前返回待接入状态', () => {
   });
 });
 
-test('清空、创建、打开交易所和购买原子步骤入口返回可测试状态', () => {
+test('清空、创建、打开交易所、购买、转移、补油修理和发船原子步骤入口返回可测试状态', () => {
   const api = createGtAutopilot();
 
   assert.deepEqual(api.runAtomicAction('wishlist_clear_base_wishlist'), {
@@ -689,6 +693,30 @@ test('清空、创建、打开交易所和购买原子步骤入口返回可测�
     label: '购买 wishlist',
     status: 'ready',
     message: '购买 wishlist：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_transfer_to_ship'), {
+    action: 'wishlist_transfer_to_ship',
+    label: '转移到飞船',
+    status: 'ready',
+    message: '转移到飞船：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_fuel_ship'), {
+    action: 'wishlist_fuel_ship',
+    label: '飞船补油',
+    status: 'ready',
+    message: '飞船补油：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_repair_ship'), {
+    action: 'wishlist_repair_ship',
+    label: '修理飞船',
+    status: 'ready',
+    message: '修理飞船：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_send_ship_home'), {
+    action: 'wishlist_send_ship_home',
+    label: '发船回基地',
+    status: 'ready',
+    message: '发船回基地：可测试'
   });
 });
 
@@ -754,6 +782,101 @@ test('读取 wishlist 原子功能会统计条目数量、总数量和估算价�
   assert.throws(
     () => api.planWishlistRowsSummary([]),
     /wishlist 为空/
+  );
+});
+
+test('转移到飞船原子功能会把 wishlist 条目转成装船批次', () => {
+  const api = createGtAutopilot();
+  const result = api.planWishlistTransferBatch({
+    shipInfo: {
+      location: 'exchange',
+      ship: { name: '200000 反物质-09' }
+    }
+  }, [
+    { id: 12, name: 'Basic Rations', amount: 10 },
+    { id: 16, name: 'Drinking Water', amount: 12 }
+  ]);
+
+  assert.deepEqual(result, {
+    ship: { name: '200000 反物质-09' },
+    batch: [
+      { id: 12, name: 'Basic Rations', current: 10 },
+      { id: 16, name: 'Drinking Water', current: 12 }
+    ]
+  });
+});
+
+test('转移到飞船原子功能要求飞船在交易所且 wishlist 非空', () => {
+  const api = createGtAutopilot();
+  assert.throws(
+    () => api.planWishlistTransferBatch({ shipInfo: { location: 'base', ship: { name: 'ship' } } }, [{ id: 12, name: 'Basic Rations', amount: 10 }]),
+    /飞船不在交易所/
+  );
+  assert.throws(
+    () => api.planWishlistTransferBatch({ shipInfo: { location: 'exchange', ship: { name: 'ship' } } }, []),
+    /wishlist 为空/
+  );
+});
+
+test('补油和修理原子功能会生成安全检查计划', () => {
+  const api = createGtAutopilot();
+  assert.deepEqual(api.planWishlistShipMaintenance({
+    shipInfo: { location: 'exchange', ship: { name: 'ship-09' } }
+  }, 'fuel'), {
+    ship: { name: 'ship-09' },
+    materialName: 'Antimatter',
+    mode: 'fuel',
+    uiAction: 'manual-safe-check'
+  });
+  assert.deepEqual(api.planWishlistShipMaintenance({
+    shipInfo: { location: 'exchange', ship: { name: 'ship-09' } }
+  }, 'repair'), {
+    ship: { name: 'ship-09' },
+    materialName: 'Ship Repair Kit',
+    mode: 'repair',
+    uiAction: 'manual-safe-check'
+  });
+});
+
+test('补油和修理原子功能要求飞船在交易所', () => {
+  const api = createGtAutopilot();
+  assert.throws(
+    () => api.planWishlistShipMaintenance({ shipInfo: { location: 'base', ship: { name: 'ship' } } }, 'fuel'),
+    /飞船不在交易所/
+  );
+  assert.throws(
+    () => api.planWishlistShipMaintenance({ shipInfo: { location: 'exchange', ship: { name: 'ship' } } }, 'unknown'),
+    /未知维护模式/
+  );
+});
+
+test('发船回基地原子功能会生成返航计划', () => {
+  const api = createGtAutopilot();
+  const result = api.planWishlistSendShipHome({
+    base: { id: 20437, name: '0-冶炼 合金09' },
+    shipInfo: {
+      location: 'exchange',
+      ship: { name: '200000 反物质-09' }
+    }
+  });
+
+  assert.deepEqual(result, {
+    ship: { name: '200000 反物质-09' },
+    destinationName: '0-冶炼 合金09',
+    autoUnload: true,
+    reactorMode: 'normal'
+  });
+});
+
+test('发船回基地原子功能要求飞船在交易所且基地明确', () => {
+  const api = createGtAutopilot();
+  assert.throws(
+    () => api.planWishlistSendShipHome({ base: { name: '0-冶炼 合金09' }, shipInfo: { location: 'base', ship: { name: 'ship' } } }),
+    /飞船不在交易所/
+  );
+  assert.throws(
+    () => api.planWishlistSendShipHome({ base: {}, shipInfo: { location: 'exchange', ship: { name: 'ship' } } }),
+    /未读取到当前基地/
   );
 });
 

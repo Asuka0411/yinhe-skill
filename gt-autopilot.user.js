@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.24
+// @version      0.1.25
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.24';
+  var APP_VERSION = '0.1.25';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -79,10 +79,10 @@
     { action: 'wishlist_open_exchange', label: '打开交易所', status: 'ready' },
     { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
     { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'ready' },
-    { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'pending' },
-    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'pending' },
-    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'pending' },
-    { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'pending' },
+    { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'ready' },
+    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'ready' },
+    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'ready' },
+    { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'ready' },
   ];
   var SHIP_SUPPORT_MATERIALS = [
     { id: 149, name: 'Antimatter', targetAmount: 2000, role: 'fuel' },
@@ -284,6 +284,76 @@
       totalAmount: normalized.reduce(function (sum, row) { return sum + row.amount; }, 0),
       estimatedCost: normalized.reduce(function (sum, row) { return sum + row.cost; }, 0),
       rows: normalized,
+    };
+  }
+
+  function planWishlistTransferBatch(snapshot, rows) {
+    var shipInfo = snapshot && snapshot.shipInfo || {};
+    var ship = shipInfo.ship;
+    if (!ship) {
+      throw new Error('未找到当前基地对应飞船');
+    }
+    if (shipInfo.location !== 'exchange') {
+      throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
+    }
+    var summary = planWishlistRowsSummary(rows);
+    return {
+      ship: ship,
+      batch: summary.rows.map(function (row) {
+        return {
+          id: row.id,
+          name: row.name,
+          current: row.amount,
+        };
+      }),
+    };
+  }
+
+  function planWishlistSendShipHome(snapshot) {
+    var base = snapshot && snapshot.base || {};
+    var shipInfo = snapshot && snapshot.shipInfo || {};
+    var ship = shipInfo.ship;
+    var destinationName = normalizeText(base.name);
+    if (!ship) {
+      throw new Error('未找到当前基地对应飞船');
+    }
+    if (shipInfo.location !== 'exchange') {
+      throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
+    }
+    if (!destinationName) {
+      throw new Error('未读取到当前基地');
+    }
+    return {
+      ship: ship,
+      destinationName: destinationName,
+      autoUnload: true,
+      reactorMode: 'normal',
+    };
+  }
+
+  function planWishlistShipMaintenance(snapshot, mode) {
+    var shipInfo = snapshot && snapshot.shipInfo || {};
+    var ship = shipInfo.ship;
+    var normalizedMode = normalizeText(mode);
+    var materialName;
+    if (!ship) {
+      throw new Error('未找到当前基地对应飞船');
+    }
+    if (shipInfo.location !== 'exchange') {
+      throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
+    }
+    if (normalizedMode === 'fuel') {
+      materialName = 'Antimatter';
+    } else if (normalizedMode === 'repair') {
+      materialName = 'Ship Repair Kit';
+    } else {
+      throw new Error('未知维护模式：' + normalizedMode);
+    }
+    return {
+      ship: ship,
+      materialName: materialName,
+      mode: normalizedMode,
+      uiAction: 'manual-safe-check',
     };
   }
 
@@ -1832,6 +1902,42 @@
       });
     }
 
+    function runWishlistTransferToShip(snapshot) {
+      return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
+        var plan = planWishlistTransferBatch(snapshot, rows);
+        pushStep('转移到飞船', plan.ship.name + '，' + plan.batch.length + ' 种物资');
+        return loadBatchOntoShip(plan.batch, plan.ship).then(function (transferSummary) {
+          pushStep('转移完成', transferSummary.length ? transferSummary.map(function (item) {
+            return item.name + ' x ' + item.amount;
+          }).join('，') : '未转移物资');
+          return {
+            ship: plan.ship,
+            transferSummary: transferSummary,
+          };
+        });
+      });
+    }
+
+    function runWishlistSendShipHome(snapshot) {
+      var plan = planWishlistSendShipHome(snapshot);
+      pushStep('发船回基地', plan.ship.name + ' -> ' + plan.destinationName + '，普通动力，自动卸货');
+      return moveShipToDestination(plan.ship, plan.destinationName).then(function () {
+        pushStep('运输', '已尝试发船回基地');
+        return {
+          ship: plan.ship,
+          destinationName: plan.destinationName,
+          waitMs: DEFAULTS.transportWaitIntervalMs,
+        };
+      });
+    }
+
+    function runWishlistShipMaintenance(snapshot, mode) {
+      var plan = planWishlistShipMaintenance(snapshot, mode);
+      pushStep(plan.mode === 'fuel' ? '飞船补油' : '修理飞船', plan.ship.name + '，需要使用 ' + plan.materialName);
+      pushStep('安全检查', '真实补油/修理按钮尚未校准，本步骤只做前置检查，不点击未知控件');
+      return Promise.resolve(plan);
+    }
+
     function runWishlistAtomicAction(action, snapshot) {
       if (action === 'wishlist_read_current_base') {
         return runWishlistReadCurrentBase(snapshot);
@@ -1853,6 +1959,18 @@
       }
       if (action === 'wishlist_buy_wishlist') {
         return runWishlistBuyWishlist(snapshot);
+      }
+      if (action === 'wishlist_transfer_to_ship') {
+        return runWishlistTransferToShip(snapshot);
+      }
+      if (action === 'wishlist_fuel_ship') {
+        return runWishlistShipMaintenance(snapshot, 'fuel');
+      }
+      if (action === 'wishlist_repair_ship') {
+        return runWishlistShipMaintenance(snapshot, 'repair');
+      }
+      if (action === 'wishlist_send_ship_home') {
+        return runWishlistSendShipHome(snapshot);
       }
       return Promise.resolve(runAtomicAction(action));
     }
@@ -1914,7 +2032,11 @@
         'wishlist_create_resupply_wishlist',
         'wishlist_open_exchange',
         'wishlist_read_wishlist',
-        'wishlist_buy_wishlist'
+        'wishlist_buy_wishlist',
+        'wishlist_transfer_to_ship',
+        'wishlist_fuel_ship',
+        'wishlist_repair_ship',
+        'wishlist_send_ship_home'
       ].indexOf(result.action) >= 0) {
         if (state.running) {
           pushStep('忙碌', '已有任务在运行');
@@ -3595,6 +3717,9 @@
       planWishlistReadCurrentBase: planWishlistReadCurrentBase,
       planWishlistShipAtExchange: planWishlistShipAtExchange,
       planWishlistRowsSummary: planWishlistRowsSummary,
+      planWishlistTransferBatch: planWishlistTransferBatch,
+      planWishlistSendShipHome: planWishlistSendShipHome,
+      planWishlistShipMaintenance: planWishlistShipMaintenance,
       planShipSupportMaterialRestock: planShipSupportMaterialRestock,
       planExchangeInventorySellBatch: planExchangeInventorySellBatch,
       calculateSellOfferPrice: calculateSellOfferPrice,
