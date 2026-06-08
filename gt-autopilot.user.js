@@ -3999,6 +3999,7 @@
       readSellOfferPriceInDocument: readSellOfferPriceInDocument,
       stepDownSellOfferPriceInDocument: stepDownSellOfferPriceInDocument,
       clickCreateOfferButtonInDocument: clickCreateOfferButtonInDocument,
+      _testMoveShipToDestination: moveShipToDestination,
       _testRunWishlistClearBaseWishlist: runWishlistClearBaseWishlist,
       _testBuyWishlistItemsFromUi: buyWishlistItemsFromUi,
       _testSellBatchOnExchange: sellBatchOnExchange,

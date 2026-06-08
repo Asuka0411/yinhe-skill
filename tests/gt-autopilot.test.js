@@ -632,6 +632,143 @@ function createShipInfoModalDoc(options = {}) {
   return doc;
 }
 
+function createShipFlightDoc(options = {}) {
+  const events = [];
+  const shipWarehouseLabel = {
+    textContent: options.shipName || 'Demo Hauler',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('warehouse-tab');
+    }
+  };
+  const shipInfoLabel = {
+    textContent: options.shipName || 'Demo Hauler',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('info-tab');
+    }
+  };
+  const shipLink = {
+    textContent: options.shipName || 'Demo Hauler',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('ship-panel');
+    }
+  };
+  const destinationInput = {
+    id: 'daInputField',
+    value: '',
+    getAttribute() {
+      return '';
+    },
+    getClientRects() {
+      return [{}];
+    },
+    focus() {},
+    dispatchEvent(event) {
+      if (!event || event.type === 'input') {
+        events.push('destination:' + this.value);
+      }
+    }
+  };
+  const correctSuggestion = {
+    textContent: options.destinationName || '0-冶炼 合金09',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('suggestion:' + this.textContent);
+    }
+  };
+  const wrongSuggestion = {
+    textContent: 'Exchange Station',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('wrong-suggestion');
+    }
+  };
+  const unloadCheckbox = {
+    id: 'showUOA',
+    checked: false,
+    getAttribute() {
+      return '';
+    },
+    focus() {},
+    dispatchEvent(event) {
+      if (!event || event.type === 'change') {
+        events.push('auto-unload:' + this.checked);
+      }
+    },
+    click() {
+      this.checked = !this.checked;
+      events.push('auto-unload-click:' + this.checked);
+    }
+  };
+  const startButton = {
+    textContent: 'Start flight',
+    innerText: 'Start flight',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      events.push('start-flight');
+    }
+  };
+  return {
+    events,
+    destinationInput,
+    unloadCheckbox,
+    startButton,
+    getElementById(id) {
+      if (id === 'daInputField') {
+        return options.missingDestinationInput ? null : destinationInput;
+      }
+      if (id === 'showUOA') {
+        return options.missingUnload ? null : unloadCheckbox;
+      }
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === 'button[data-btn-start-flight]') {
+        return options.missingStart ? null : startButton;
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'label[for^="btnradio-whwt"]') {
+        return [shipWarehouseLabel];
+      }
+      if (selector === 'label[for^="btnradioinfo"]') {
+        return [shipInfoLabel];
+      }
+      if (selector === 'span.link-primary.fw-bold.me-2, span.link-primary.cursor-pointer.text-truncate') {
+        return options.missingShipPanel ? [] : [shipLink];
+      }
+      if (selector === '#daInputField + ul.dropdown-menu.show li.dropdown-item, #daInputField + ul.dropdown-menu.show li[role="button"]') {
+        return options.missingSuggestion ? [wrongSuggestion] : [wrongSuggestion, correctSuggestion];
+      }
+      if (selector === 'input[type="checkbox"]') {
+        return options.missingUnload ? [] : [unloadCheckbox];
+      }
+      if (selector === 'button, a, [role="button"], [role="tab"]') {
+        return options.missingStart ? [] : [startButton];
+      }
+      if (selector === 'input, textarea') {
+        return [destinationInput];
+      }
+      return [];
+    }
+  };
+}
+
 function createMixedPricePageDoc() {
   const inventoryCard = {
     textContent: 'Exchange Warehouse Ship Repair Kit 2,000 1,500t $2.8m Antimatter Containment 2,000 $12.8m',
@@ -1281,6 +1418,56 @@ test('发船回基地原子功能要求飞船在交易所且基地明确', () =>
     () => api.planWishlistSendShipHome({ base: {}, shipInfo: { location: 'exchange', ship: { name: 'ship' } } }),
     /未读取到当前基地/
   );
+});
+
+test('发船 helper 会选择目标基地、开启自动卸货并点击起飞', async () => {
+  const doc = createShipFlightDoc({ shipName: 'Demo Hauler', destinationName: '0-冶炼 合金09' });
+  const api = createGtAutopilot({
+    document: doc,
+    Event: class TestEvent {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    setTimeout(resolve) {
+      resolve();
+    }
+  });
+
+  const result = await api._testMoveShipToDestination({ name: 'Demo Hauler' }, '0-冶炼 合金09');
+
+  assert.equal(result, true);
+  assert.deepEqual(doc.events, [
+    'warehouse-tab',
+    'ship-panel',
+    'info-tab',
+    'destination:0-冶炼 合金09',
+    'suggestion:0-冶炼 合金09',
+    'auto-unload:true',
+    'start-flight'
+  ]);
+  assert.equal(doc.unloadCheckbox.checked, true);
+});
+
+test('发船 helper 找不到目标基地候选时不会点击起飞', async () => {
+  const doc = createShipFlightDoc({ shipName: 'Demo Hauler', destinationName: '0-冶炼 合金09', missingSuggestion: true });
+  const api = createGtAutopilot({
+    document: doc,
+    Event: class TestEvent {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    setTimeout(resolve) {
+      resolve();
+    }
+  });
+
+  await assert.rejects(
+    api._testMoveShipToDestination({ name: 'Demo Hauler' }, '0-冶炼 合金09'),
+    /未找到目的地候选/
+  );
+  assert.equal(doc.events.includes('start-flight'), false);
 });
 
 test('原子功能当前只有一键卖货标记为已完成', () => {
