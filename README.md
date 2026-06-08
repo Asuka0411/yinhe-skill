@@ -6,16 +6,36 @@
 
 - `gt-autopilot.user.js`：主用户脚本
 - `references/`：参考脚本与参考记录
+- `scripts/`：本地发布、Chrome 调试与辅助脚本
 - `tests/`：Node 单测与本地调试页
 - `docs/superpowers/specs/`：需求设计
 - `docs/superpowers/plans/`：执行计划
 
-## 安装
+## 首次安装
 
 1. 安装 `Tampermonkey` 或 `Violentmonkey`
-2. 新建脚本
-3. 将 [gt-autopilot.user.js](/Users/dango/Documents/yinhe-skill/gt-autopilot.user.js:1) 全部内容粘贴进去并保存
-4. 打开 `https://g2.galactictycoons.com/` 或 `https://galactictycoons.com/`
+2. 启动本地静态服务：`python3 -m http.server 18793`
+3. 在 Chrome 打开 `http://127.0.0.1:18793/gt-autopilot.user.js`
+4. 在 Tampermonkey 页面确认安装
+5. 打开 `https://g2.galactictycoons.com/` 或 `https://galactictycoons.com/`
+
+## 日常更新
+
+脚本变更后必须执行：
+
+```bash
+npm run release:local
+```
+
+该命令会自动完成：
+
+- 校验 [gt-autopilot.user.js](/Users/dango/Documents/yinhe-skill/gt-autopilot.user.js:1) 的 `@version` 与 `APP_VERSION` 一致
+- 执行 `node --check` 与全部 Node 单测
+- 同步下载副本 `/Users/dango/Downloads/gt-autopilot (2).user.js`
+- 校验 `http://127.0.0.1:18793/gt-autopilot.user.js` 返回的是当前版本
+- 打开 Tampermonkey 更新页并自动点击确认更新按钮
+
+如果 Tampermonkey 页面按钮文案变化导致自动点击失败，命令会输出当前页面 URL、标题和按钮列表，后续应优先校准 [scripts/release-local.js](/Users/dango/Documents/yinhe-skill/scripts/release-local.js:1)，不要回退到手动复制脚本。
 
 ## 当前能力
 

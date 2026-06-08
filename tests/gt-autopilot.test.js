@@ -521,7 +521,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.20');
+  assert.equal(api.version, '0.1.21');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -529,6 +529,7 @@ test('原子功能测试区域会把旧流程按钮放在最后', () => {
   const html = api._testBuildAtomicActionsHtml();
 
   assert.ok(html.indexOf('data-atomic-action="sell_exchange_inventory"') >= 0);
+  assert.ok(html.indexOf('data-atomic-action="buy_wishlist"') > html.indexOf('data-atomic-action="sell_exchange_inventory"'));
   assert.ok(html.indexOf('data-atomic-action="restock_ship_repair_materials"') >= 0);
   assert.ok(html.indexOf('data-action="sell"') > html.indexOf('data-atomic-action="restock_ship_repair_materials"'));
   assert.ok(html.indexOf('data-action="stop"') > html.indexOf('data-action="sell"'));
@@ -579,6 +580,7 @@ test('原子功能按钮定义包含加油、修飞船、修建筑、补修理�
   const api = createGtAutopilot();
   assert.deepEqual(api.getAtomicActions(), [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
+    { action: 'buy_wishlist', label: '一键购买 wishlist' },
     { action: 'fuel_ship', label: '一键加油' },
     { action: 'repair_ship', label: '一键修飞船' },
     { action: 'repair_base_buildings', label: '一键修基地建筑' },
