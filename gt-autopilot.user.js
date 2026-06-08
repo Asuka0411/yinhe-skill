@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.0
+// @version      0.1.20
+// @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
+// @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
 // @match        https://galactictycoons.com/*
 // @match        https://g2.galactictycoons.com/*
@@ -36,8 +38,11 @@
     transportWaitIntervalMs: 30000,
     wikiApiKey: 'S4K6lDzaRcS4',
     outboundWhitelist: [
-      { id: 172, enabled: true, minAmount: 1 },
-      { id: 136, enabled: true, minAmount: 1 },
+      { id: 80, enabled: true, minAmount: 1, name: 'Graphenium Wire' },
+    ],
+    sellBlacklist: [
+      { id: 113, enabled: true, name: 'Ship Repair Kit' },
+      { id: 149, enabled: true, name: 'Antimatter' },
     ],
   };
 
@@ -56,6 +61,19 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
+  var APP_VERSION = '0.1.20';
+  var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
+  var ATOMIC_ACTIONS = [
+    { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
+    { action: 'fuel_ship', label: '一键加油' },
+    { action: 'repair_ship', label: '一键修飞船' },
+    { action: 'repair_base_buildings', label: '一键修基地建筑' },
+    { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' },
+  ];
+  var SHIP_SUPPORT_MATERIALS = [
+    { id: 149, name: 'Antimatter', targetAmount: 2000, role: 'fuel' },
+    { id: 113, name: 'Ship Repair Kit', targetAmount: 2000, role: 'repair' },
+  ];
 
   function normalizeText(value) {
     return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
@@ -94,6 +112,128 @@
     };
   }
 
+  function getAtomicActions() {
+    return deepClone(ATOMIC_ACTIONS);
+  }
+
+  function findAtomicAction(action) {
+    var name = normalizeText(action);
+    for (var i = 0; i < ATOMIC_ACTIONS.length; i += 1) {
+      if (ATOMIC_ACTIONS[i].action === name) {
+        return ATOMIC_ACTIONS[i];
+      }
+    }
+    return null;
+  }
+
+  function runAtomicAction(action) {
+    var entry = findAtomicAction(action);
+    if (!entry) {
+      return {
+        action: normalizeText(action),
+        label: '未知原子功能',
+        status: 'failed',
+        message: '未知原子功能：' + normalizeText(action),
+      };
+    }
+    return {
+      action: entry.action,
+      label: entry.label,
+      status: 'pending',
+      message: entry.label + '：真实流程待接入',
+    };
+  }
+
+  function getShipSupportMaterials() {
+    return deepClone(SHIP_SUPPORT_MATERIALS);
+  }
+
+  function planShipSupportMaterialRestock(exchangeWarehouse) {
+    var byId = mapById((exchangeWarehouse && exchangeWarehouse.mats) || []);
+    return SHIP_SUPPORT_MATERIALS.map(function (material) {
+      var current = amountOf(byId.get(Number(material.id)));
+      var missing = Math.max(0, Number(material.targetAmount || 0) - current);
+      if (!missing) {
+        return null;
+      }
+      return {
+        id: material.id,
+        name: material.name,
+        amount: missing,
+        current: current,
+        targetAmount: material.targetAmount,
+        role: material.role,
+      };
+    }).filter(Boolean);
+  }
+
+  function normalizeMaterialBlocklist(entries, materialNames) {
+    var names = materialNames || {};
+    var seen = new Set();
+    return (entries || []).map(function (entry) {
+      var id = Number(entry && entry.id);
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) {
+        return null;
+      }
+      seen.add(id);
+      var icon = getMaterialIconMeta(id, names, entry);
+      return {
+        id: id,
+        enabled: entry && entry.enabled !== false,
+        name: names[id] || entry.name || ('物资 ' + id),
+        iconId: icon.iconId,
+        iconHref: icon.iconHref,
+      };
+    }).filter(Boolean);
+  }
+
+  function planExchangeInventorySellBatch(exchangeWarehouse, config) {
+    var names = defaultMaterialNames();
+    var blacklist = config && Array.isArray(config.sellBlacklist) ? config.sellBlacklist : DEFAULTS.sellBlacklist;
+    var blocked = new Set(normalizeMaterialBlocklist(blacklist, names)
+      .filter(function (entry) { return entry.enabled; })
+      .map(function (entry) { return Number(entry.id); }));
+    return ((exchangeWarehouse && exchangeWarehouse.mats) || []).map(function (item) {
+      var id = materialIdOf(item);
+      var amount = amountOf(item);
+      if (!Number.isFinite(id) || blocked.has(Number(id)) || amount <= 0) {
+        return null;
+      }
+      return {
+        id: id,
+        name: names[id] || ('Material ' + id),
+        current: amount,
+      };
+    }).filter(Boolean);
+  }
+
+  function calculateSellOfferPrice(lowestPrice) {
+    var price = Number(lowestPrice || 0);
+    if (!Number.isFinite(price) || price <= 0) {
+      return 0;
+    }
+    return price;
+  }
+
+  function validateSellOfferBeforeSubmit(options) {
+    var expectedAmount = Number(options && options.expectedAmount || 0);
+    var actualAmount = Number(options && options.actualAmount || 0);
+    var actualPrice = Number(options && options.actualPrice || 0);
+    if (!expectedAmount || actualAmount !== expectedAmount) {
+      return {
+        ok: false,
+        reason: '卖货数量异常：期望 ' + expectedAmount + '，实际 ' + actualAmount,
+      };
+    }
+    if (!actualPrice) {
+      return {
+        ok: false,
+        reason: '卖货价格为空或无效：实际 ' + actualPrice,
+      };
+    }
+    return { ok: true, reason: '' };
+  }
+
   function resolveStorage() {
     try {
       if (root.localStorage) {
@@ -128,6 +268,7 @@
   function createBaseStore(storage, baseId) {
     var defaults = {
       outboundWhitelist: deepClone(DEFAULTS.outboundWhitelist),
+      sellBlacklist: deepClone(DEFAULTS.sellBlacklist),
       minOutboundAmount: {},
       resupplyDays: DEFAULTS.resupplyDays,
       apiKey: DEFAULTS.wikiApiKey,
@@ -140,13 +281,33 @@
 
     var key = baseKey(baseId, 'config');
 
+    function normalizeConfig(value) {
+      var next = Object.assign({}, deepClone(defaults), value || {});
+      next.workflow = Object.assign({}, deepClone(defaults.workflow), (value && value.workflow) || {});
+      next.resupplyDays = Math.max(1, parseInt(next.resupplyDays, 10) || DEFAULTS.resupplyDays);
+      next.apiKey = normalizeText(next.apiKey || next.wikiApiKey || DEFAULTS.wikiApiKey) || DEFAULTS.wikiApiKey;
+      next.wikiApiKey = next.apiKey;
+      next.outboundWhitelist = normalizeOutboundWhitelist(next.outboundWhitelist || defaults.outboundWhitelist, defaultMaterialNames());
+      next.sellBlacklist = normalizeMaterialBlocklist(next.sellBlacklist || defaults.sellBlacklist, defaultMaterialNames());
+      if (!next.sellBlacklist.length) {
+        next.sellBlacklist = normalizeMaterialBlocklist(defaults.sellBlacklist, defaultMaterialNames());
+      }
+      return next;
+    }
+
     function read() {
-      return loadJSON(storage, key, defaults);
+      var current = loadJSON(storage, key, defaults);
+      var normalized = normalizeConfig(current);
+      if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+        saveJSON(storage, key, normalized);
+      }
+      return normalized;
     }
 
     function write(value) {
-      saveJSON(storage, key, value);
-      return value;
+      var normalized = normalizeConfig(value);
+      saveJSON(storage, key, normalized);
+      return normalized;
     }
 
     function patch(mutator) {
@@ -262,17 +423,24 @@
   }
 
   function materialIdOf(item) {
-    return Number(item && (item.id != null ? item.id : item.i));
+    return Number(item && (item.matId != null ? item.matId : item.id != null ? item.id : item.i));
   }
 
   function amountOf(item) {
-    return Number(item && (item.am != null ? item.am : item.a != null ? item.a : item.amount != null ? item.amount : 0));
+    if (!item) {
+      return 0;
+    }
+    var amount = Number(item.am != null ? item.am : item.a != null ? item.a : item.amount != null ? item.amount : 0);
+    return Number.isFinite(amount) ? amount : 0;
   }
 
   function mapById(list) {
     var map = new Map();
     (list || []).forEach(function (item) {
-      map.set(Number(item.id), item);
+      var id = materialIdOf(item);
+      if (Number.isFinite(id)) {
+        map.set(id, item);
+      }
     });
     return map;
   }
@@ -288,6 +456,50 @@
     return null;
   }
 
+  function materialIconIdFromName(name) {
+    return normalizeText(name).replace(/[^a-zA-Z0-9]+/g, '');
+  }
+
+  function defaultMaterialIconIds() {
+    return {
+      80: 'Superconductors',
+      113: 'ShipRepairKit',
+      136: 'TiridiumAlloy',
+      149: 'Antimatter',
+      172: 'Graphenium',
+    };
+  }
+
+  function getMaterialIconMeta(materialId, materialNames, entry) {
+    var id = Number(materialId);
+    var iconId = normalizeText(entry && entry.iconId);
+    var iconHref = normalizeText(entry && entry.iconHref);
+    if (!iconId) {
+      iconId = defaultMaterialIconIds()[id] || materialIconIdFromName((materialNames && materialNames[id]) || '');
+    }
+    if (!iconId) {
+      iconId = 'Material' + id;
+    }
+    if (!iconHref) {
+      iconHref = MATERIAL_ATLAS_HREF + '#' + iconId;
+    }
+    return {
+      iconId: iconId,
+      iconHref: iconHref,
+    };
+  }
+
+  function materialIconHtml(entry, materialNames) {
+    var icon = getMaterialIconMeta(entry && entry.id, materialNames, entry);
+    return [
+      '<span class="gtap-material-icon" data-icon-id="' + escapeHtml(icon.iconId) + '" data-icon-href="' + escapeHtml(icon.iconHref) + '" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);">',
+      '<svg aria-hidden="true" style="width:18px;height:18px;fill:currentColor;color:#dbe7f7;">',
+      '<use href="' + escapeHtml(icon.iconHref) + '" xlink:href="' + escapeHtml(icon.iconHref) + '"></use>',
+      '</svg>',
+      '</span>'
+    ].join('');
+  }
+
   function normalizeOutboundWhitelist(entries, materialNames) {
     var names = materialNames || {};
     var seen = new Set();
@@ -298,11 +510,14 @@
         return null;
       }
       seen.add(id);
+      var icon = getMaterialIconMeta(id, names, entry);
       return {
         id: id,
         enabled: entry && entry.enabled !== false,
         minAmount: minAmount,
         name: names[id] || entry.name || ('物资 ' + id),
+        iconId: icon.iconId,
+        iconHref: icon.iconHref,
       };
     }).filter(Boolean);
   }
@@ -432,7 +647,7 @@
       77: 'Graphene',
       78: 'Carbon Nanotubes',
       79: 'Aerogel',
-      80: 'Superconductors',
+      80: 'Graphenium Wire',
       81: 'Radiation Shielding',
       82: 'Life Support System',
       83: 'Reinforced Glass',
@@ -572,7 +787,7 @@
         var amount = amountOf(current);
         return {
           id: Number(entry.id),
-          name: entry.name || fallbackNames[Number(entry.id)] || ('Material ' + entry.id),
+          name: fallbackNames[Number(entry.id)] || entry.name || ('Material ' + entry.id),
           current: amount,
           minAmount: Number(entry.minAmount || 1),
           canSend: amount >= Number(entry.minAmount || 1),
@@ -583,7 +798,127 @@
       });
   }
 
-  function inferShipLocation(company, base) {
+  function readShipsFromPage(doc) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') {
+      return [];
+    }
+    return Array.prototype.slice.call(doc.querySelectorAll('li.list-group-item.list-group-item-hover.list-group-item-dark'))
+      .map(function (node) {
+        var nameNode = node && typeof node.querySelector === 'function'
+          ? node.querySelector('span.link-primary.cursor-pointer.text-truncate')
+          : null;
+        var locationNode = node && typeof node.querySelector === 'function'
+          ? (
+            node.querySelector('div.text-body-secondary.small span.cursor-pointer.link-light') ||
+            node.querySelector('div.text-body-secondary.small')
+          )
+          : null;
+        var name = normalizeText(nameNode && (nameNode.textContent || nameNode.innerText));
+        var locationText = normalizeText(locationNode && (locationNode.textContent || locationNode.innerText));
+        if (!name || !locationText) {
+          return null;
+        }
+        return {
+          name: name,
+          locationText: locationText,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function extractTrailingToken(value) {
+    var text = normalizeText(value);
+    var hyphenMatch = text.match(/-([^- ]+)$/);
+    if (hyphenMatch) {
+      return hyphenMatch[1];
+    }
+    var numberMatch = text.match(/(\d+)(?!.*\d)/);
+    return numberMatch ? numberMatch[1] : '';
+  }
+
+  function sameRouteToken(left, right) {
+    var a = normalizeText(left);
+    var b = normalizeText(right);
+    if (!a || !b) {
+      return false;
+    }
+    return String(parseInt(a, 10)) === String(parseInt(b, 10)) || a === b;
+  }
+
+  function shipMatchesBase(ship, base) {
+    var shipToken = extractTrailingToken(ship && ship.name);
+    var baseToken = extractTrailingToken(base && base.name);
+    if (!shipToken || !baseToken) {
+      return false;
+    }
+    return sameRouteToken(shipToken, baseToken);
+  }
+
+  function findShipByBaseHint(ships, base) {
+    var list = Array.isArray(ships) ? ships : [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (shipMatchesBase(list[i], base)) {
+        return list[i];
+      }
+    }
+    return null;
+  }
+
+  function isExchangeLocationText(value) {
+    return /exchange station/i.test(normalizeText(value));
+  }
+
+  function isTransitLocationText(value) {
+    return /(arriv|transit|travel|flight|en route|boosted)/i.test(normalizeText(value));
+  }
+
+  function inferShipLocationFromPage(doc, base) {
+    var ships = readShipsFromPage(doc);
+    var baseName = normalizeText(base && base.name);
+    var hintedShip = findShipByBaseHint(ships, base);
+    var baseShip = null;
+    var exchangeShip = null;
+    var transitShip = null;
+    var i;
+
+    if (!ships.length) {
+      return null;
+    }
+
+    for (i = 0; i < ships.length; i += 1) {
+      if (baseName && normalizeText(ships[i].locationText) === baseName) {
+        baseShip = ships[i];
+        break;
+      }
+      if (!exchangeShip && isExchangeLocationText(ships[i].locationText)) {
+        exchangeShip = ships[i];
+      }
+      if (!transitShip && isTransitLocationText(ships[i].locationText)) {
+        transitShip = ships[i];
+      }
+    }
+
+    if (baseShip) {
+      return { location: 'base', ship: baseShip };
+    }
+    if (hintedShip) {
+      if (isExchangeLocationText(hintedShip.locationText)) {
+        return { location: 'exchange', ship: hintedShip };
+      }
+      if (isTransitLocationText(hintedShip.locationText)) {
+        return { location: 'transit', ship: hintedShip };
+      }
+    }
+    if (exchangeShip) {
+      return { location: 'exchange', ship: exchangeShip };
+    }
+    if (transitShip) {
+      return { location: 'transit', ship: transitShip };
+    }
+    return null;
+  }
+
+  function inferShipLocation(company, base, doc) {
     var baseWarehouseId = base && base.warehouseId;
     var basePlanetId = base && base.planetId;
     var exchangeWarehouseId = company && company.exWhId;
@@ -591,13 +926,14 @@
     var exchangeShip = null;
     var transitShip = null;
     var ships = company && Array.isArray(company.ships) ? company.ships : [];
+    var hintedShip = findShipByBaseHint(ships, base);
     var i;
 
     if (ships.length === 0) {
-      return { location: 'unknown', ship: null };
+      return inferShipLocationFromPage(doc, base) || { location: 'unknown', ship: null };
     }
 
-    ship = ships[0];
+    ship = hintedShip || ships[0];
     for (i = 0; i < ships.length; i += 1) {
       if (baseWarehouseId != null && Number(ships[i].warehouseId) === Number(baseWarehouseId)) {
         ship = ships[i];
@@ -635,7 +971,7 @@
     if (ship && ship.flight) {
       return { location: 'transit', ship: ship };
     }
-    return { location: 'unknown', ship: ship };
+    return inferShipLocationFromPage(doc, base) || { location: 'unknown', ship: ship };
   }
 
   function wait(ms) {
@@ -681,18 +1017,62 @@
     return false;
   }
 
+  function findButtonByIconHref(docRef, iconToken) {
+    if (!docRef || !iconToken || typeof docRef.querySelectorAll !== 'function') {
+      return null;
+    }
+    var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button'));
+    for (var i = 0; i < buttons.length; i += 1) {
+      if (String(buttons[i].innerHTML || '').indexOf(iconToken) >= 0) {
+        return buttons[i];
+      }
+    }
+    return null;
+  }
+
   function setInputValue(input, value) {
     if (!input) {
       return false;
     }
     input.focus();
-    input.value = value;
+    var textValue = String(value);
+    try {
+      var proto = root.HTMLInputElement && input instanceof root.HTMLInputElement
+        ? root.HTMLInputElement.prototype
+        : null;
+      var descriptor = proto && Object.getOwnPropertyDescriptor(proto, 'value');
+      if (descriptor && typeof descriptor.set === 'function') {
+        descriptor.set.call(input, textValue);
+      } else {
+        input.value = textValue;
+      }
+    } catch (error) {
+      input.value = textValue;
+    }
     if (typeof input.dispatchEvent === 'function' && root.Event) {
       input.dispatchEvent(new root.Event('input', { bubbles: true }));
       input.dispatchEvent(new root.Event('change', { bubbles: true }));
       input.dispatchEvent(new root.Event('blur', { bubbles: true }));
     }
     return true;
+  }
+
+  function setCheckboxValue(input, checked) {
+    if (!input) {
+      return false;
+    }
+    if (!!input.checked === !!checked) {
+      return true;
+    }
+    input.checked = !!checked;
+    if (typeof input.dispatchEvent === 'function' && root.Event) {
+      input.dispatchEvent(new root.Event('input', { bubbles: true }));
+      input.dispatchEvent(new root.Event('change', { bubbles: true }));
+      input.dispatchEvent(new root.Event('click', { bubbles: true }));
+    } else if (typeof input.click === 'function') {
+      input.click();
+    }
+    return !!input.checked === !!checked;
   }
 
   function findVisibleCheckboxes(doc) {
@@ -778,6 +1158,50 @@
       }
     }
 
+    function buildAtomicActionRowHtml(entry) {
+      var done = entry.status === 'done';
+      var style = done
+        ? 'background:linear-gradient(135deg,#14b86f,#0d8f78);border-color:rgba(91,255,190,0.75);color:#ffffff;font-weight:700;box-shadow:0 0 0 1px rgba(91,255,190,0.18),0 8px 18px rgba(20,184,111,0.22);'
+        : '';
+      var title = done ? '已完成并可用' : '待接入/待验证';
+      var expanded = entry.action === 'sell_exchange_inventory';
+      return [
+        '<div data-atomic-row="' + escapeHtml(entry.action) + '" style="display:grid;grid-template-columns:1fr 58px;gap:6px;align-items:center;">',
+        '<button data-atomic-action="' + escapeHtml(entry.action) + '" data-atomic-status="' + escapeHtml(entry.status || 'pending') + '" title="' + escapeHtml(title) + '" style="' + style + '">' + escapeHtml(entry.label) + '</button>',
+        '<button data-atomic-config-toggle="' + escapeHtml(entry.action) + '" style="padding:6px 8px;">' + (expanded ? '收起' : '展开') + '</button>',
+        '<div data-atomic-config-panel="' + escapeHtml(entry.action) + '" style="grid-column:1/-1;display:' + (expanded ? 'block' : 'none') + ';margin:2px 0 4px 0;padding:8px;border-radius:9px;background:rgba(0,0,0,0.16);border:1px solid rgba(255,255,255,0.08);">',
+        entry.action === 'sell_exchange_inventory'
+          ? '<div id="gtap-sell-config"></div>'
+          : '<div style="opacity:.72;">该功能待接入，暂无配置。</div>',
+        '</div>',
+        '</div>'
+      ].join('');
+    }
+
+    function buildWorkflowActionRowsHtml() {
+      return [
+        '<div style="height:1px;background:rgba(255,255,255,0.10);margin:4px 0;"></div>',
+        '<div data-workflow-actions style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">',
+        '<div style="display:grid;grid-template-columns:1fr 58px;gap:6px;">',
+        '<button data-action="sell">卖货</button>',
+        '<button data-main-config-toggle="sell" style="padding:6px 8px;">展开</button>',
+        '<div data-main-config-panel="sell" style="grid-column:1/-1;display:none;margin:2px 0 4px 0;padding:8px;border-radius:9px;background:rgba(0,0,0,0.16);border:1px solid rgba(255,255,255,0.08);">',
+        '<div id="gtap-old-sell-config"></div>',
+        '</div>',
+        '</div>',
+        '<button data-action="resupply">补货</button>',
+        '<button data-action="auto">自动</button>',
+        '<button data-action="check">检查</button>',
+        '<button data-action="wait">等待</button>',
+        '<button data-action="stop" style="grid-column:1/-1;">停止</button>',
+        '</div>'
+      ].join('');
+    }
+
+    function buildAtomicActionsHtml() {
+      return ATOMIC_ACTIONS.map(buildAtomicActionRowHtml).join('') + buildWorkflowActionRowsHtml();
+    }
+
     function ensurePanel() {
       if (!doc || doc.getElementById('gtap-panel')) {
         return;
@@ -800,11 +1224,17 @@
         'box-shadow:0 16px 40px rgba(0,0,0,0.35)',
       ].join(';');
 
+      var atomicButtonsHtml = buildAtomicActionsHtml();
+
       panel.innerHTML = [
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">',
+        '<div style="display:flex;align-items:baseline;gap:8px;">',
         '<strong>GT Autopilot</strong>',
+        '<span style="opacity:.72;font-size:11px;">v' + escapeHtml(APP_VERSION) + '</span>',
+        '</div>',
         '<span id="gtap-status">就绪</span>',
         '</div>',
+        '<div id="gtap-panel-body">',
         '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:10px;">',
         '<label style="display:flex;flex-direction:column;gap:4px;min-width:0;">',
         '<span style="opacity:.8;">API Key</span>',
@@ -812,20 +1242,40 @@
         '</label>',
         '<button data-action="save-config" style="height:38px;">保存</button>',
         '</div>',
-        '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px;">',
-        '<button data-action="sell">卖货</button>',
-        '<button data-action="resupply">补货</button>',
-        '<button data-action="auto">自动</button>',
-        '<button data-action="check">检查</button>',
-        '<button data-action="wait">等待</button>',
-        '<button data-action="stop" style="grid-column:1/-1;">停止</button>',
+        '<div id="gtap-atomic-actions" style="margin-bottom:8px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.04);">',
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">',
+        '<strong>原子功能测试</strong>',
+        '<span style="opacity:.65;font-size:11px;">先验证入口</span>',
+        '</div>',
+        '<div style="display:grid;grid-template-columns:1fr;gap:6px;">',
+        atomicButtonsHtml,
+        '</div>',
         '</div>',
         '<div id="gtap-config" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);"></div>',
         '<div id="gtap-history" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);max-height:180px;overflow:auto;"></div>',
         '<div id="gtap-log" title="拖动右下角可调整日志高度" style="white-space:pre-wrap;height:220px;min-height:120px;max-height:520px;resize:vertical;overflow:auto;background:rgba(255,255,255,0.04);border-radius:10px;padding:10px;box-sizing:border-box;"></div>',
+        '</div>',
       ].join('');
 
       panel.addEventListener('click', function (event) {
+        var atomicConfigButton = event.target && event.target.closest ? event.target.closest('button[data-atomic-config-toggle]') : null;
+        if (atomicConfigButton) {
+          event.preventDefault();
+          toggleAtomicConfig(atomicConfigButton.getAttribute('data-atomic-config-toggle'));
+          return;
+        }
+        var mainConfigButton = event.target && event.target.closest ? event.target.closest('button[data-main-config-toggle]') : null;
+        if (mainConfigButton) {
+          event.preventDefault();
+          toggleMainConfig(mainConfigButton.getAttribute('data-main-config-toggle'));
+          return;
+        }
+        var atomicButton = event.target && event.target.closest ? event.target.closest('button[data-atomic-action]') : null;
+        if (atomicButton) {
+          event.preventDefault();
+          handleAtomicAction(atomicButton.getAttribute('data-atomic-action'));
+          return;
+        }
         var configButton = event.target && event.target.closest ? event.target.closest('button[data-config-action]') : null;
         if (configButton) {
           event.preventDefault();
@@ -848,7 +1298,8 @@
         apiKey: DEFAULTS.wikiApiKey,
         wikiApiKey: DEFAULTS.wikiApiKey,
         resupplyDays: DEFAULTS.resupplyDays,
-        outboundWhitelist: DEFAULTS.outboundWhitelist
+        outboundWhitelist: DEFAULTS.outboundWhitelist,
+        sellBlacklist: DEFAULTS.sellBlacklist
       });
       attachPanelDrag(panel);
       log('面板已就绪');
@@ -924,6 +1375,38 @@
       } else {
         logPanel.addEventListener('mouseup', saveHeight);
         logPanel.addEventListener('mouseleave', saveHeight);
+      }
+    }
+
+    function toggleAtomicConfig(action) {
+      if (!doc || !action) {
+        return;
+      }
+      var panel = doc.querySelector('[data-atomic-config-panel="' + action + '"]');
+      var button = doc.querySelector('[data-atomic-config-toggle="' + action + '"]');
+      if (!panel) {
+        return;
+      }
+      var collapsed = panel.style.display === 'none';
+      panel.style.display = collapsed ? 'block' : 'none';
+      if (button) {
+        button.textContent = collapsed ? '收起' : '展开';
+      }
+    }
+
+    function toggleMainConfig(action) {
+      if (!doc || !action) {
+        return;
+      }
+      var panel = doc.querySelector('[data-main-config-panel="' + action + '"]');
+      var button = doc.querySelector('[data-main-config-toggle="' + action + '"]');
+      if (!panel) {
+        return;
+      }
+      var collapsed = panel.style.display === 'none';
+      panel.style.display = collapsed ? 'block' : 'none';
+      if (button) {
+        button.textContent = collapsed ? '收起' : '展开';
       }
     }
 
@@ -1031,7 +1514,7 @@
               prices: prices || [],
               exchangeWarehouse: exchangeWarehouse,
               config: baseConfig,
-              shipInfo: inferShipLocation(company, base || {}),
+              shipInfo: inferShipLocation(company, base || {}, doc),
             };
             state.lastSnapshot = snapshot;
             return snapshot;
@@ -1105,6 +1588,106 @@
       finishRun('stopped', { reason: STOP_REASON });
     }
 
+    function runRestockShipRepairMaterials(snapshot) {
+      var exchangeWarehouse = snapshot && snapshot.exchangeWarehouse;
+      var plan = planShipSupportMaterialRestock(exchangeWarehouse);
+      pushStep('检查交易所库存', SHIP_SUPPORT_MATERIALS.map(function (material) {
+        var current = 0;
+        if (exchangeWarehouse && Array.isArray(exchangeWarehouse.mats)) {
+          var match = mapById(exchangeWarehouse.mats).get(Number(material.id));
+          current = amountOf(match);
+        }
+        return material.name + ' ' + current + '/' + material.targetAmount;
+      }).join('，'));
+      if (!plan.length) {
+        pushStep('补修理材料', '库存已达到 2000，无需购买');
+        return Promise.resolve({ bought: [], plan: [] });
+      }
+      pushStep('待购买', plan.map(function (item) { return item.name + ' x ' + item.amount; }).join('，'));
+      return navigateToExchangePage().then(function () {
+        return buyWishlistItemsFromUi(plan);
+      }).then(function (buySummary) {
+        pushStep('补修理材料完成', buySummary.length ? ('已购买 ' + buySummary.length + ' 种物资') : '未购买物资');
+        return { bought: buySummary, plan: plan };
+      });
+    }
+
+    function runSellExchangeInventory(snapshot) {
+      var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.defaults : deepClone(DEFAULTS));
+      var plan = planExchangeInventorySellBatch(snapshot && snapshot.exchangeWarehouse, config);
+      pushStep('检查交易所库存', plan.length ? plan.map(function (item) {
+        return item.name + ' x ' + item.current;
+      }).join('，') : '黑名单过滤后无可卖库存');
+      if (!plan.length) {
+        return Promise.resolve({ sold: [], plan: [] });
+      }
+      return navigateToExchangePage().then(function () {
+        return sellBatchOnExchange(plan);
+      }).then(function (sellSummary) {
+        pushStep('一键卖货完成', sellSummary.length ? ('已创建 ' + sellSummary.length + ' 个卖单') : '未创建卖单');
+        return { sold: sellSummary, plan: plan };
+      });
+    }
+
+    function handleAtomicAction(action) {
+      var result = runAtomicAction(action);
+      if (result.action === 'sell_exchange_inventory') {
+        if (state.running) {
+          pushStep('忙碌', '已有任务在运行');
+          return;
+        }
+        readBaseContext().then(function (snapshot) {
+          startRun('atomic_' + result.action);
+          pushStep('原子功能', result.label);
+          savePanelConfig(snapshot);
+          snapshot.config = state.baseStore ? state.baseStore.read() : snapshot.config;
+          return runSellExchangeInventory(snapshot).then(function (summary) {
+            finishRun('success', {
+              action: result.action,
+              label: result.label,
+              sold: summary.sold,
+              plan: summary.plan,
+            });
+          });
+        }).catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('原子功能失败', state.lastError);
+          finishRun('failed', { action: result.action, label: result.label, error: state.lastError });
+        });
+        return;
+      }
+      if (result.action === 'restock_ship_repair_materials') {
+        if (state.running) {
+          pushStep('忙碌', '已有任务在运行');
+          return;
+        }
+        readBaseContext().then(function (snapshot) {
+          startRun('atomic_' + result.action);
+          pushStep('原子功能', result.label);
+          return runRestockShipRepairMaterials(snapshot).then(function (summary) {
+            finishRun('success', {
+              action: result.action,
+              label: result.label,
+              bought: summary.bought,
+              plan: summary.plan,
+            });
+          });
+        }).catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('原子功能失败', state.lastError);
+          finishRun('failed', { action: result.action, label: result.label, error: state.lastError });
+        });
+        return;
+      }
+      startRun('atomic_' + normalizeText(result.action || action));
+      pushStep('原子功能', result.message);
+      finishRun(result.status === 'failed' ? 'failed' : 'pending', {
+        action: result.action,
+        label: result.label,
+        status: result.status,
+      });
+    }
+
     function getShipSnapshot(snapshot) {
       return snapshot && snapshot.shipInfo ? snapshot.shipInfo : { location: 'unknown', ship: null };
     }
@@ -1151,13 +1734,17 @@
       if (!batch.length) {
         return Promise.resolve({ next: 'done', sold: [] });
       }
-      return navigateToBaseAndOpenWarehouse().then(function () {
+      return navigateToBaseAndOpenWarehouse(base).then(function () {
         pushStep('页面', '已切到基地仓库');
+        return loadBatchOntoShip(batch, shipInfo.ship);
+      }).then(function (loadSummary) {
+        pushStep('装货', loadSummary.length ? loadSummary.map(function (item) { return item.name + ' x ' + item.amount; }).join('，') : '无');
         return moveShipToDestination(shipInfo.ship, 'Exchange Station').then(function () {
           pushStep('运输', '已尝试发船到交易所');
           return {
             next: 'wait',
             batch: batch,
+            loaded: loadSummary,
             sold: [],
             ship: shipInfo.ship,
             waitMs: DEFAULTS.transportWaitIntervalMs,
@@ -1560,7 +2147,58 @@
       return wait(1600).then(function () { return true; });
     }
 
+    function findBaseListButtonByName(baseName) {
+      if (!doc || !baseName) {
+        return null;
+      }
+      var nodes = Array.prototype.slice.call(doc.querySelectorAll('button.list-group-item, a.list-group-item, [role="button"].list-group-item'));
+      for (var i = 0; i < nodes.length; i += 1) {
+        if (textIncludesAny(nodes[i].textContent || '', [baseName])) {
+          return nodes[i];
+        }
+      }
+      return null;
+    }
+
+    function findShipTabLabel(shipName, prefixes) {
+      if (!doc || !shipName || !prefixes || !prefixes.length) {
+        return null;
+      }
+      var selector = prefixes.map(function (prefix) {
+        return 'label[for^="' + prefix + '"]';
+      }).join(', ');
+      var labels = Array.prototype.slice.call(doc.querySelectorAll(selector));
+      for (var i = 0; i < labels.length; i += 1) {
+        if (normalizeText(labels[i].textContent || '') === normalizeText(shipName)) {
+          return labels[i];
+        }
+      }
+      return null;
+    }
+
+    function selectShipWarehouseTab(ship) {
+      var label = findShipTabLabel(ship && ship.name, ['btnradio-whwt']);
+      if (!label) {
+        return false;
+      }
+      clickElement(label);
+      return true;
+    }
+
+    function selectShipInfoTab(ship) {
+      var label = findShipTabLabel(ship && ship.name, ['btnradioinfo']);
+      if (!label) {
+        return false;
+      }
+      clickElement(label);
+      return true;
+    }
+
     function findDestinationInput() {
+      var direct = doc && doc.getElementById ? doc.getElementById('daInputField') : null;
+      if (direct && direct.getClientRects && direct.getClientRects().length) {
+        return direct;
+      }
       var inputs = findVisibleInputs(doc);
       for (var i = 0; i < inputs.length; i += 1) {
         var input = inputs[i];
@@ -1573,31 +2211,105 @@
       return null;
     }
 
+    function findDestinationSuggestionByText(docRef, text) {
+      if (!docRef || !text) {
+        return null;
+      }
+      var dropdownNodes = Array.prototype.slice.call(docRef.querySelectorAll('#daInputField + ul.dropdown-menu.show li.dropdown-item, #daInputField + ul.dropdown-menu.show li[role="button"]'));
+      for (var i = 0; i < dropdownNodes.length; i += 1) {
+        if (textIncludesAny(dropdownNodes[i].textContent || '', [text])) {
+          return dropdownNodes[i];
+        }
+      }
+      return findSuggestionByText(text);
+    }
+
+    function findUnloadOnArrivalCheckbox(docRef) {
+      if (!docRef) {
+        return null;
+      }
+      if (typeof docRef.getElementById === 'function') {
+        var direct = docRef.getElementById('showUOA');
+        if (direct) {
+          return direct;
+        }
+      }
+      var checkboxes = typeof docRef.querySelectorAll === 'function'
+        ? Array.prototype.slice.call(docRef.querySelectorAll('input[type="checkbox"]'))
+        : [];
+      for (var i = 0; i < checkboxes.length; i += 1) {
+        var checkbox = checkboxes[i];
+        var row = checkbox.closest ? checkbox.closest('.row') : null;
+        if (row && textIncludesAny(row.textContent || '', ['Unload On Arrival'])) {
+          return checkbox;
+        }
+      }
+      return null;
+    }
+
+    function openShipFlightPanel(ship) {
+      if (!doc || !ship || !ship.name) {
+        return false;
+      }
+      var links = Array.prototype.slice.call(doc.querySelectorAll('span.link-primary.fw-bold.me-2, span.link-primary.cursor-pointer.text-truncate'));
+      for (var i = 0; i < links.length; i += 1) {
+        if (normalizeText(links[i].textContent || '') === normalizeText(ship.name)) {
+          clickElement(links[i]);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function findStartFlightButton() {
+      if (!doc) {
+        return null;
+      }
+      return doc.querySelector('button[data-btn-start-flight]') || findUniqueButtonByTexts(doc, START_FLIGHT_BUTTON_TEXTS);
+    }
+
     function moveShipToDestination(ship, destinationName) {
       if (!doc || !ship || !destinationName) {
         return Promise.resolve(false);
       }
-      var shipCard = findShipCard(ship);
-      if (shipCard) {
-        clickElement(shipCard);
-      }
-      return wait(400).then(function () {
+      selectShipWarehouseTab(ship);
+      return wait(300).then(function () {
+        if (!openShipFlightPanel(ship)) {
+          throw new Error('未找到飞船出发面板');
+        }
+        return wait(500);
+      }).then(function () {
+        selectShipInfoTab(ship);
+        return wait(200);
+      }).then(function () {
         var input = findDestinationInput();
-        if (input) {
-          setInputValue(input, destinationName);
+        if (!input) {
+          throw new Error('未找到目的地输入框');
         }
+        setInputValue(input, destinationName);
+        return wait(300);
+      }).then(function () {
+        var suggestion = findDestinationSuggestionByText(doc, destinationName);
+        if (!suggestion) {
+          throw new Error('未找到目的地候选：' + destinationName);
+        }
+        clickElement(suggestion);
         return wait(400);
       }).then(function () {
-        var suggestion = findSuggestionByText(destinationName);
-        if (suggestion) {
-          clickElement(suggestion);
+        var unloadCheckbox = findUnloadOnArrivalCheckbox(doc);
+        if (!unloadCheckbox) {
+          throw new Error('未找到自动卸货开关');
         }
-        return wait(400);
+        if (!setCheckboxValue(unloadCheckbox, true) && !unloadCheckbox.checked) {
+          throw new Error('自动卸货开关未能开启');
+        }
+        return wait(200);
       }).then(function () {
-        var startButton = findUniqueButtonByTexts(doc, START_FLIGHT_BUTTON_TEXTS);
-        if (startButton) {
-          clickElement(startButton);
+        var startButton = findStartFlightButton();
+        if (!startButton) {
+          throw new Error('未找到 Start flight 按钮');
         }
+        clickElement(startButton);
         return true;
       });
     }
@@ -1634,6 +2346,77 @@
       return null;
     }
 
+    function matchesWarehouseRowMaterial(rowText, materialName) {
+      var name = normalizeText(materialName);
+      var text = normalizeText(rowText);
+      if (!name || !text) {
+        return false;
+      }
+      var escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var pattern = new RegExp('^' + escaped + '(?:\\s*[✓✗]|\\s+\\d|$)', 'i');
+      return pattern.test(text);
+    }
+
+    function findWarehouseTransferButton(materialName) {
+      if (!doc || !materialName) {
+        return null;
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"]'));
+      for (var i = 0; i < rows.length; i += 1) {
+        var rowText = normalizeText(rows[i].textContent || '');
+        if (!matchesWarehouseRowMaterial(rowText, materialName)) {
+          continue;
+        }
+        var buttons = Array.prototype.slice.call(rows[i].querySelectorAll('button'));
+        for (var j = 0; j < buttons.length; j += 1) {
+          if (String(buttons[j].innerHTML || '').indexOf('#arrow-right') >= 0) {
+            return buttons[j];
+          }
+        }
+      }
+      return null;
+    }
+
+    function loadBatchOntoShip(batch, ship) {
+      if (!doc || !ship) {
+        return Promise.resolve([]);
+      }
+      if (!selectShipWarehouseTab(ship)) {
+        throw new Error('未找到货舱飞船标签：' + normalizeText(ship.name || ''));
+      }
+      return wait(300).then(function () {
+        var summary = [];
+        return (batch || []).reduce(function (promise, item) {
+          return promise.then(function () {
+            if (!item || !item.name || !item.current) {
+              return;
+            }
+            var button = findWarehouseTransferButton(item.name);
+            if (!button) {
+              throw new Error('未找到装货按钮：' + item.name);
+            }
+            clickElement(button);
+            summary.push({ name: item.name, amount: item.current });
+            return wait(350);
+          });
+        }, Promise.resolve()).then(function () {
+          if (!summary.length) {
+            return summary;
+          }
+          var confirmButton = findButtonByIconHref(doc, '#check');
+          if (!confirmButton) {
+            throw new Error('未找到装货确认按钮');
+          }
+          clickElement(confirmButton);
+          return wait(500).then(function () {
+            return summary;
+          });
+        }).then(function () {
+          return summary;
+        });
+      });
+    }
+
     function searchExchangeMaterial(materialName) {
       var inputs = findVisibleInputs(doc);
       for (var i = 0; i < inputs.length; i += 1) {
@@ -1647,14 +2430,31 @@
       return false;
     }
 
-    function clickExchangeMaterialRow(materialName) {
-      if (!doc) {
+    function exchangeRowMatchesMaterial(rowText, materialName) {
+      var name = normalizeText(materialName);
+      var text = normalizeText(rowText);
+      if (!name || !text) {
         return false;
       }
-      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      if (text === name) {
+        return true;
+      }
+      if (text.indexOf(name) !== 0) {
+        return false;
+      }
+      var rest = text.slice(name.length).replace(/^\s+/, '');
+      var nextChar = rest.charAt(0);
+      return !nextChar || !/[A-Za-z]/.test(nextChar);
+    }
+
+    function clickExchangeMaterialRowInDocument(docRef, materialName) {
+      if (!docRef) {
+        return false;
+      }
+      var rows = Array.prototype.slice.call(docRef.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
       for (var i = 0; i < rows.length; i += 1) {
         var text = normalizeText(rows[i].textContent || '');
-        if (text.indexOf(normalizeText(materialName)) >= 0) {
+        if (exchangeRowMatchesMaterial(text, materialName)) {
           clickElement(rows[i]);
           return true;
         }
@@ -1662,14 +2462,299 @@
       return false;
     }
 
-    function setTradeAmount(amount) {
-      var inputs = Array.prototype.slice.call(doc.querySelectorAll('input[type="number"], input'));
+    function clickExchangeMaterialRow(materialName) {
+      return clickExchangeMaterialRowInDocument(doc, materialName);
+    }
+
+    function buttonLooksLikeSellWarehouseAction(button) {
+      var html = String(button && button.innerHTML || '').toLowerCase();
+      var text = normalizeText(button && (button.textContent || button.innerText || ''));
+      if (!button) {
+        return false;
+      }
+      if (
+        html.indexOf('sack-dollar') >= 0 ||
+        html.indexOf('arrow-up-from-line') >= 0 ||
+        html.indexOf('arrow-up-to-line') >= 0 ||
+        html.indexOf('#upload') >= 0 ||
+        html.indexOf('upload') >= 0
+      ) {
+        return true;
+      }
+      if (
+        html.indexOf('arrow-down-to-line') >= 0 ||
+        html.indexOf('download') >= 0
+      ) {
+        return false;
+      }
+      return textIncludesAny(text, SELL_FORM_BUTTON_TEXTS);
+    }
+
+    function clickExchangeWarehouseSellButtonInDocument(docRef, materialName) {
+      if (!docRef || !materialName) {
+        return false;
+      }
+      var rows = Array.prototype.slice.call(docRef.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      for (var i = 0; i < rows.length; i += 1) {
+        var rowText = normalizeText(rows[i].textContent || '');
+        if (!matchesWarehouseRowMaterial(rowText, materialName) && !exchangeRowMatchesMaterial(rowText, materialName)) {
+          continue;
+        }
+        var buttons = Array.prototype.slice.call(rows[i].querySelectorAll ? rows[i].querySelectorAll('button') : []);
+        for (var j = 0; j < buttons.length; j += 1) {
+          if (buttonLooksLikeSellWarehouseAction(buttons[j])) {
+            return clickElement(buttons[j]);
+          }
+        }
+      }
+      return false;
+    }
+
+    function clickExchangeWarehouseSellButton(materialName) {
+      return clickExchangeWarehouseSellButtonInDocument(doc, materialName);
+    }
+
+    function setTradeAmountInDocument(docRef, amount) {
+      var inputs = Array.prototype.slice.call(docRef.querySelectorAll('input[type="number"], input'));
       for (var i = 0; i < inputs.length; i += 1) {
         var input = inputs[i];
         var placeholder = normalizeText(input.getAttribute('placeholder') || '');
         var aria = normalizeText(input.getAttribute('aria-label') || '');
         if (input.type === 'number' || textIncludesAny(placeholder, ['amount', '数量']) || textIncludesAny(aria, ['amount', '数量'])) {
           return setInputValue(input, String(amount));
+        }
+      }
+      return false;
+    }
+
+    function setTradeAmount(amount) {
+      return setTradeAmountInDocument(doc, amount);
+    }
+
+    function inputTextHints(input) {
+      if (!input) {
+        return '';
+      }
+      return [
+        input.getAttribute && input.getAttribute('placeholder'),
+        input.getAttribute && input.getAttribute('aria-label'),
+        input.name,
+        input.id,
+      ].map(normalizeText).join(' ');
+    }
+
+    function visibleFormInputs(docRef) {
+      return Array.prototype.slice.call(docRef.querySelectorAll('input[type="number"], input')).filter(function (input) {
+        return input && (!input.getClientRects || input.getClientRects().length);
+      });
+    }
+
+    function setSellOfferAmountInDocument(docRef, amount) {
+      if (!docRef) {
+        return false;
+      }
+      var inputs = visibleFormInputs(docRef);
+      for (var i = 0; i < inputs.length; i += 1) {
+        if (textIncludesAny(inputTextHints(inputs[i]), ['amount', 'quantity', '数量'])) {
+          return setInputValue(inputs[i], String(amount));
+        }
+      }
+      return inputs.length ? setInputValue(inputs[0], String(amount)) : false;
+    }
+
+    function findSellOfferAmountInputInDocument(docRef) {
+      if (!docRef) {
+        return null;
+      }
+      var inputs = visibleFormInputs(docRef);
+      for (var i = 0; i < inputs.length; i += 1) {
+        if (textIncludesAny(inputTextHints(inputs[i]), ['amount', 'quantity', '数量'])) {
+          return inputs[i];
+        }
+      }
+      return inputs.length ? inputs[0] : null;
+    }
+
+    function readSellOfferAmountInDocument(docRef) {
+      var input = findSellOfferAmountInputInDocument(docRef);
+      return parseNumber(input && input.value, 0);
+    }
+
+    function setSellOfferPriceInDocument(docRef, price) {
+      if (!docRef) {
+        return false;
+      }
+      var inputs = visibleFormInputs(docRef);
+      for (var i = 0; i < inputs.length; i += 1) {
+        if (textIncludesAny(inputTextHints(inputs[i]), ['price', 'unit', '价格', '单价'])) {
+          return setInputValue(inputs[i], String(price));
+        }
+      }
+      return inputs.length > 1 ? setInputValue(inputs[inputs.length - 1], String(price)) : false;
+    }
+
+    function findSellOfferPriceInputInDocument(docRef) {
+      if (!docRef) {
+        return null;
+      }
+      var inputs = visibleFormInputs(docRef);
+      for (var i = 0; i < inputs.length; i += 1) {
+        if (textIncludesAny(inputTextHints(inputs[i]), ['price', 'unit', '价格', '单价'])) {
+          return inputs[i];
+        }
+      }
+      return inputs.length > 1 ? inputs[inputs.length - 1] : null;
+    }
+
+    function readSellOfferPriceInDocument(docRef) {
+      var input = findSellOfferPriceInputInDocument(docRef);
+      return parseNumber(input && input.value, 0);
+    }
+
+    function readInputMinValue(input) {
+      if (!input) {
+        return 0;
+      }
+      return parseNumber(
+        input.getAttribute && input.getAttribute('min') != null ? input.getAttribute('min') : input.min,
+        0
+      );
+    }
+
+    function findPriceStepDownButton(input) {
+      var scope = input && input.parentElement;
+      if (!scope || typeof scope.querySelectorAll !== 'function') {
+        return null;
+      }
+      var buttons = Array.prototype.slice.call(scope.querySelectorAll('button'));
+      for (var i = 0; i < buttons.length; i += 1) {
+        var html = String(buttons[i].innerHTML || '').toLowerCase();
+        if (html.indexOf('sort-down') >= 0) {
+          return buttons[i];
+        }
+      }
+      return null;
+    }
+
+    function stepDownSellOfferPriceInDocument(docRef) {
+      var input = findSellOfferPriceInputInDocument(docRef);
+      if (!input) {
+        return false;
+      }
+      var before = parseNumber(input.value, 0);
+      var min = readInputMinValue(input);
+      var stepButton = findPriceStepDownButton(input);
+      if (stepButton) {
+        clickElement(stepButton);
+      } else if (typeof input.stepDown === 'function') {
+        input.stepDown();
+      } else {
+        setInputValue(input, String(before > 100 ? before - 100 : Math.max(1, before - 1)));
+      }
+      var after = parseNumber(input.value, 0);
+      if (min > 0 && (!after || after < min)) {
+        setInputValue(input, String(min));
+      } else if (!after && before) {
+        setInputValue(input, String(before));
+      } else if (typeof input.dispatchEvent === 'function' && root.Event) {
+        input.dispatchEvent(new root.Event('input', { bubbles: true }));
+        input.dispatchEvent(new root.Event('change', { bubbles: true }));
+        input.dispatchEvent(new root.Event('blur', { bubbles: true }));
+      }
+      return true;
+    }
+
+    function clickSellTabInDocument(docRef) {
+      var button = findUniqueButtonByTexts(docRef, SELL_FORM_BUTTON_TEXTS);
+      if (!button) {
+        return false;
+      }
+      return clickElement(button);
+    }
+
+    function readLowestOfferPriceInDocument(docRef) {
+      if (!docRef) {
+        return 0;
+      }
+      var nodes = Array.prototype.slice.call(docRef.querySelectorAll('tr, [role="row"], .list-group-item, .card, .d-flex'));
+      var prices = [];
+      nodes.forEach(function (node) {
+        if (!rowLooksLikeExternalOffer(node)) {
+          return;
+        }
+        var text = normalizeText(node && (node.textContent || node.innerText || ''));
+        var matches = text.match(/(?:[$]\s*[0-9][0-9,]*(?:\.\d+)?)|(?:[0-9][0-9,]*(?:\.\d+)?\s*[$])/g) || [];
+        matches.forEach(function (match) {
+          var price = parseNumber(match, 0);
+          if (price > 0) {
+            prices.push(price);
+          }
+        });
+      });
+      if (!prices.length) {
+        return 0;
+      }
+      return Math.min.apply(Math, prices);
+    }
+
+    function rowLooksLikeExternalOffer(row) {
+      var text = normalizeText(row && (row.textContent || row.innerText || ''));
+      var className = String(row && row.className || '');
+      if (!text || /new offer/i.test(text) || /^offers/i.test(text)) {
+        return false;
+      }
+      return /cursor-pointer/.test(className) && /\d[\d,]*(?:\.\d+)?\s*[$]/.test(text);
+    }
+
+    function clickLowestSellOfferRowInDocument(docRef) {
+      if (!docRef) {
+        return false;
+      }
+      var rows = Array.prototype.slice.call(docRef.querySelectorAll('tr, [role="row"], .list-group-item, .card, .d-flex'));
+      var seenNewOffer = false;
+      for (var i = 0; i < rows.length; i += 1) {
+        var row = rows[i];
+        var text = normalizeText(row && (row.textContent || row.innerText || ''));
+        if (/new offer/i.test(text)) {
+          seenNewOffer = true;
+          continue;
+        }
+        if (!seenNewOffer) {
+          continue;
+        }
+        if (!rowLooksLikeExternalOffer(row)) {
+          continue;
+        }
+        return clickElement(row);
+      }
+      return false;
+    }
+
+    function clickCreateOfferButtonInDocument(docRef) {
+      var button = findUniqueButtonByTexts(docRef, ['Create offer', 'Create Offer', '创建订单', '创建报价', '发布']);
+      if (!button) {
+        return false;
+      }
+      return clickElement(button);
+    }
+
+    function clickFinalBuyButtonInDocument(docRef) {
+      if (!docRef) {
+        return false;
+      }
+      var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button')).filter(function (node) {
+        return node && node.getClientRects && node.getClientRects().length && textIncludesAny(node.textContent || node.innerText || '', BUY_BUTTON_TEXTS);
+      });
+      for (var i = buttons.length - 1; i >= 0; i -= 1) {
+        var html = String(buttons[i].innerHTML || '');
+        if (
+          html.indexOf('#arrow-down-to-line') >= 0 ||
+          html.indexOf('arrow-down-to-line') >= 0 ||
+          html.indexOf('#download') >= 0 ||
+          html.indexOf('download') >= 0 ||
+          i === buttons.length - 1
+        ) {
+          return clickElement(buttons[i]);
         }
       }
       return false;
@@ -1701,10 +2786,14 @@
             clickExchangeMaterialRow(item.name);
             return wait(300);
           }).then(function () {
-            setTradeAmount(item.amount);
+            if (!setTradeAmount(item.amount)) {
+              throw new Error('未找到购买数量输入框：' + item.name);
+            }
             return wait(200);
           }).then(function () {
-            clickTradeAction(BUY_BUTTON_TEXTS);
+            if (!clickFinalBuyButtonInDocument(doc)) {
+              throw new Error('未找到最终购买按钮：' + item.name);
+            }
             summary.push({ name: item.name, amount: item.amount });
           });
         });
@@ -1721,15 +2810,32 @@
             return;
           }
           pushStep('卖出物资', item.name + ' x ' + item.current);
-          searchExchangeMaterial(item.name);
-          return wait(300).then(function () {
-            clickExchangeMaterialRow(item.name);
-            return wait(300);
-          }).then(function () {
-            setTradeAmount(item.current);
+          if (!clickExchangeWarehouseSellButton(item.name)) {
+            throw new Error('未找到交易所仓库卖货按钮：' + item.name);
+          }
+          return wait(500).then(function () {
+            clickSellTabInDocument(doc);
             return wait(200);
           }).then(function () {
-            clickTradeAction(SELL_FORM_BUTTON_TEXTS);
+            if (!setSellOfferAmountInDocument(doc, item.current)) {
+              throw new Error('未找到卖货数量输入框：' + item.name);
+            }
+            if (!clickLowestSellOfferRowInDocument(doc)) {
+              throw new Error('未找到可点击的最低报价行：' + item.name);
+            }
+            return wait(200);
+          }).then(function () {
+            var validation = validateSellOfferBeforeSubmit({
+              expectedAmount: item.current,
+              actualAmount: readSellOfferAmountInDocument(doc),
+              actualPrice: readSellOfferPriceInDocument(doc),
+            });
+            if (!validation.ok) {
+              throw new Error(validation.reason + '：' + item.name);
+            }
+            if (!clickCreateOfferButtonInDocument(doc)) {
+              throw new Error('未找到 Create offer 按钮：' + item.name);
+            }
             summary.push({ name: item.name, amount: item.current });
           });
         });
@@ -1738,15 +2844,22 @@
       });
     }
 
-    function navigateToBaseAndOpenWarehouse() {
+    function navigateToBaseAndOpenWarehouse(base) {
       if (!doc) {
         return Promise.resolve(false);
+      }
+      var currentBaseId = getCurrentBaseId();
+      if (base && base.id != null && Number(currentBaseId) !== Number(base.id)) {
+        var baseItem = findBaseListButtonByName(base.name || ('Base ' + base.id));
+        if (baseItem) {
+          clickElement(baseItem);
+        }
       }
       var baseButton = findUniqueButtonByTexts(doc, BASE_BUTTON_TEXTS);
       if (baseButton) {
         clickElement(baseButton);
       }
-      return wait(700).then(function () {
+      return wait(base && base.id != null && Number(currentBaseId) !== Number(base.id) ? 1200 : 700).then(function () {
         var warehouseButton = findUniqueButtonByTexts(doc, WAREHOUSE_BUTTON_TEXTS);
         if (warehouseButton) {
           clickElement(warehouseButton);
@@ -1794,20 +2907,35 @@
 
     function renderConfig(config) {
       var container = doc && doc.getElementById('gtap-config');
-      if (!container) {
+      var oldSellContainer = doc && doc.getElementById('gtap-old-sell-config');
+      var sellContainer = doc && doc.getElementById('gtap-sell-config');
+      if (!container && !oldSellContainer && !sellContainer) {
         return;
       }
       if (!config) {
-        container.innerHTML = [
-          '<div style="display:flex;justify-content:space-between;align-items:center;">',
-          '<strong>基地配置</strong>',
-          '<span style="opacity:.7;">等待加载</span>',
-          '</div>',
-          '<div style="margin-top:6px;opacity:.7;">点击“检查”后加载当前基地配置。</div>'
-        ].join('');
+        if (container) {
+          container.innerHTML = [
+            '<div style="display:flex;justify-content:space-between;align-items:center;">',
+            '<strong>基地配置</strong>',
+            '<span style="opacity:.7;">等待加载</span>',
+            '</div>',
+            '<div style="margin-top:6px;opacity:.7;">点击“检查”后加载当前基地配置。</div>'
+          ].join('');
+        }
+        if (sellContainer) {
+          sellContainer.innerHTML = '<div style="opacity:.7;">点击“检查”后加载一键卖货配置。</div>';
+        }
+        if (oldSellContainer) {
+          oldSellContainer.innerHTML = '<div style="opacity:.7;">点击“检查”后加载卖货配置。</div>';
+        }
         return;
       }
-      var whitelist = normalizeOutboundWhitelist((config && config.outboundWhitelist) || [], materialNames);
+      var effectiveConfig = Object.assign({}, config);
+      if (!Array.isArray(effectiveConfig.sellBlacklist) || !effectiveConfig.sellBlacklist.length) {
+        effectiveConfig.sellBlacklist = deepClone(DEFAULTS.sellBlacklist);
+      }
+      var whitelist = normalizeOutboundWhitelist((effectiveConfig && effectiveConfig.outboundWhitelist) || [], materialNames);
+      var blacklist = normalizeMaterialBlocklist((effectiveConfig && effectiveConfig.sellBlacklist) || DEFAULTS.sellBlacklist, materialNames);
       var materialOptions = Object.keys(materialNames).map(function (id) {
         return { id: Number(id), name: materialNames[id] };
       }).sort(function (a, b) {
@@ -1817,46 +2945,85 @@
       }).join('');
       var rows = whitelist.map(function (entry) {
         return [
-          '<div data-whitelist-row="' + entry.id + '" style="display:grid;grid-template-columns:auto 1fr 88px auto;gap:8px;align-items:center;margin-top:8px;">',
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;">',
+          '<div data-whitelist-row="' + entry.id + '" data-icon-id="' + escapeHtml(entry.iconId || '') + '" data-icon-href="' + escapeHtml(entry.iconHref || '') + '" style="display:grid;grid-template-columns:auto 24px minmax(0,1fr) 64px auto;gap:6px;align-items:center;margin-top:6px;">',
+          '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">',
           '<input class="gtap-whitelist-enabled" data-entry-id="' + entry.id + '" type="checkbox"' + (entry.enabled ? ' checked' : '') + '>',
           '<span style="opacity:.85;">启用</span>',
           '</label>',
-          '<select class="gtap-whitelist-material" data-entry-id="' + entry.id + '" style="min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:6px 8px;">',
+          materialIconHtml(entry, materialNames),
+          '<select class="gtap-whitelist-material" data-entry-id="' + entry.id + '" style="min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:5px 6px;">',
           materialOptions.replace('value="' + entry.id + '"', 'value="' + entry.id + '" selected'),
           '</select>',
-          '<input class="gtap-whitelist-min" data-entry-id="' + entry.id + '" type="number" min="1" step="1" value="' + Number(entry.minAmount || 1) + '" style="width:100%;box-sizing:border-box;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:6px 8px;">',
-          '<button data-config-action="remove-whitelist-row" data-entry-id="' + entry.id + '" style="padding:6px 8px;">删除</button>',
+          '<input class="gtap-whitelist-min" data-entry-id="' + entry.id + '" type="number" min="1" step="1" value="' + Number(entry.minAmount || 1) + '" style="width:100%;box-sizing:border-box;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:5px 6px;">',
+          '<button data-config-action="remove-whitelist-row" data-entry-id="' + entry.id + '" style="padding:5px 7px;">删除</button>',
           '</div>'
         ].join('');
       }).join('');
-      container.innerHTML = [
-        '<div style="display:flex;justify-content:space-between;align-items:center;">',
-        '<strong>基地配置</strong>',
-        '<span>' + escapeHtml(normalizeText((state.lastSnapshot && state.lastSnapshot.base && state.lastSnapshot.base.name) || '当前基地')) + '</span>',
-        '</div>',
-        '<div style="display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:end;margin-top:8px;">',
-        '<label style="display:flex;flex-direction:column;gap:4px;">',
-        '<span style="opacity:.8;">补齐天数</span>',
-        '<input id="gtap-resupply-days" type="number" min="1" step="1" value="' + Number((config && config.resupplyDays) || DEFAULTS.resupplyDays) + '" style="width:100%;box-sizing:border-box;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:8px 10px;">',
-        '</label>',
-        '<div style="opacity:.7;font-size:11px;align-self:center;">超重或超预算时会自动集体缩减</div>',
-        '</div>',
-        '<label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;">',
-        '<input id="gtap-auto-mode" type="checkbox"' + (((config && config.workflow && config.workflow.autoMode) || false) ? ' checked' : '') + '>',
-        '<span>启用自动模式</span>',
-        '</label>',
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">',
-        '<strong style="font-size:12px;">卖货白名单</strong>',
-        '<button data-config-action="add-whitelist-row" style="padding:6px 8px;">新增</button>',
-        '</div>',
-        rows || '<div style="margin-top:8px;opacity:.7;">暂无白名单，点击“新增”添加。</div>',
-        '<div style="display:grid;grid-template-columns:1fr 88px auto;gap:8px;margin-top:8px;opacity:.7;font-size:11px;">',
-        '<span>物资</span>',
-        '<span>最小量</span>',
-        '<span>操作</span>',
-        '</div>'
-      ].join('');
+      var blacklistRows = blacklist.map(function (entry) {
+        return [
+          '<div data-sell-blacklist-row="' + entry.id + '" data-icon-id="' + escapeHtml(entry.iconId || '') + '" data-icon-href="' + escapeHtml(entry.iconHref || '') + '" style="display:grid;grid-template-columns:auto 24px minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:6px;">',
+          '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">',
+          '<input class="gtap-sell-blacklist-enabled" data-entry-id="' + entry.id + '" type="checkbox"' + (entry.enabled ? ' checked' : '') + '>',
+          '<span style="opacity:.85;">启用</span>',
+          '</label>',
+          materialIconHtml(entry, materialNames),
+          '<select class="gtap-sell-blacklist-material" data-entry-id="' + entry.id + '" style="min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:5px 6px;">',
+          materialOptions.replace('value="' + entry.id + '"', 'value="' + entry.id + '" selected'),
+          '</select>',
+          '<button data-config-action="remove-sell-blacklist-row" data-entry-id="' + entry.id + '" style="padding:5px 7px;">删除</button>',
+          '</div>'
+        ].join('');
+      }).join('');
+      if (container) {
+        container.innerHTML = [
+          '<div style="display:flex;justify-content:space-between;align-items:center;">',
+          '<strong>基地配置</strong>',
+          '<span>' + escapeHtml(normalizeText((state.lastSnapshot && state.lastSnapshot.base && state.lastSnapshot.base.name) || '当前基地')) + '</span>',
+          '</div>',
+          '<div style="display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:end;margin-top:8px;">',
+          '<label style="display:flex;flex-direction:column;gap:4px;">',
+          '<span style="opacity:.8;">补齐天数</span>',
+          '<input id="gtap-resupply-days" type="number" min="1" step="1" value="' + Number((effectiveConfig && effectiveConfig.resupplyDays) || DEFAULTS.resupplyDays) + '" style="width:100%;box-sizing:border-box;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:8px 10px;">',
+          '</label>',
+          '<div style="opacity:.7;font-size:11px;align-self:center;">超重或超预算时自动缩减</div>',
+          '</div>',
+          '<label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;">',
+          '<input id="gtap-auto-mode" type="checkbox"' + (((effectiveConfig && effectiveConfig.workflow && effectiveConfig.workflow.autoMode) || false) ? ' checked' : '') + '>',
+          '<span>启用自动模式</span>',
+          '</label>'
+        ].join('');
+      }
+      if (oldSellContainer) {
+        oldSellContainer.innerHTML = [
+          '<div style="display:flex;justify-content:space-between;align-items:center;">',
+          '<strong style="font-size:12px;">卖货白名单</strong>',
+          '<button data-config-action="add-whitelist-row" style="padding:5px 7px;">新增</button>',
+          '</div>',
+          rows || '<div style="margin-top:6px;opacity:.7;">暂无白名单，点击“新增”添加。</div>',
+          '<div style="display:grid;grid-template-columns:24px 1fr 64px auto;gap:6px;margin-top:6px;opacity:.7;font-size:11px;">',
+          '<span>图标</span>',
+          '<span>物资</span>',
+          '<span>最小量</span>',
+          '<span>操作</span>',
+          '</div>'
+        ].join('');
+      }
+      if (sellContainer) {
+        sellContainer.innerHTML = [
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">',
+          '<strong style="font-size:12px;">卖货黑名单</strong>',
+          '<button data-config-action="add-sell-blacklist-row" style="padding:5px 7px;">新增</button>',
+          '</div>',
+          '<div data-sell-blacklist-list>',
+          blacklistRows || '<div style="margin-top:6px;opacity:.7;">暂无黑名单，一键卖货会尝试卖出全部交易所库存。</div>',
+          '</div>',
+          '<div style="display:grid;grid-template-columns:24px 1fr auto;gap:6px;margin-top:6px;opacity:.7;font-size:11px;">',
+          '<span>图标</span>',
+          '<span>启用后该物资不会被“一键卖货”卖出。</span>',
+          '<span>操作</span>',
+          '</div>'
+        ].join('');
+      }
     }
 
     function readPanelWhitelistEntries() {
@@ -1869,10 +3036,46 @@
         var enabledInput = row.querySelector('.gtap-whitelist-enabled');
         var materialSelect = row.querySelector('.gtap-whitelist-material');
         var minInput = row.querySelector('.gtap-whitelist-min');
+        var selectedId = Number(materialSelect && materialSelect.value || id);
+        var icon = Number(id) === Number(selectedId)
+          ? {
+            iconId: normalizeText(row.getAttribute('data-icon-id') || ''),
+            iconHref: normalizeText(row.getAttribute('data-icon-href') || ''),
+          }
+          : getMaterialIconMeta(selectedId, materialNames);
         return {
-          id: Number(materialSelect && materialSelect.value || id),
+          id: selectedId,
           enabled: !!(enabledInput && enabledInput.checked),
           minAmount: Math.max(1, parseInt(minInput && minInput.value, 10) || 1),
+          name: materialNames[selectedId] || ('物资 ' + selectedId),
+          iconId: icon.iconId,
+          iconHref: icon.iconHref,
+        };
+      });
+    }
+
+    function readPanelSellBlacklistEntries() {
+      if (!doc) {
+        return [];
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('[data-sell-blacklist-row]'));
+      return rows.map(function (row) {
+        var id = Number(row.getAttribute('data-sell-blacklist-row'));
+        var enabledInput = row.querySelector('.gtap-sell-blacklist-enabled');
+        var materialSelect = row.querySelector('.gtap-sell-blacklist-material');
+        var selectedId = Number(materialSelect && materialSelect.value || id);
+        var icon = Number(id) === Number(selectedId)
+          ? {
+            iconId: normalizeText(row.getAttribute('data-icon-id') || ''),
+            iconHref: normalizeText(row.getAttribute('data-icon-href') || ''),
+          }
+          : getMaterialIconMeta(selectedId, materialNames);
+        return {
+          id: selectedId,
+          enabled: !!(enabledInput && enabledInput.checked),
+          name: materialNames[selectedId] || ('物资 ' + selectedId),
+          iconId: icon.iconId,
+          iconHref: icon.iconHref,
         };
       });
     }
@@ -1881,6 +3084,8 @@
       var baseConfig = deepClone(fallbackConfig || (state.baseStore ? state.baseStore.read() : createBaseStore(storage, 'global').defaults));
       var resupplyDaysInput = doc && doc.getElementById('gtap-resupply-days');
       var whitelistRows = readPanelWhitelistEntries();
+      var blacklistList = doc && doc.querySelector('[data-sell-blacklist-list]');
+      var blacklistRows = readPanelSellBlacklistEntries();
       if (resupplyDaysInput) {
         baseConfig.resupplyDays = Math.max(1, parseInt(resupplyDaysInput.value, 10) || DEFAULTS.resupplyDays);
       }
@@ -1889,6 +3094,9 @@
       baseConfig.workflow.autoMode = !!(autoModeInput && autoModeInput.checked);
       if (whitelistRows.length) {
         baseConfig.outboundWhitelist = normalizeOutboundWhitelist(whitelistRows, materialNames);
+      }
+      if (blacklistList) {
+        baseConfig.sellBlacklist = normalizeMaterialBlocklist(blacklistRows, materialNames);
       }
       return baseConfig;
     }
@@ -1906,6 +3114,8 @@
         enabled: true,
         minAmount: 1,
         name: materialNames[nextId] || ('物资 ' + nextId),
+        iconId: getMaterialIconMeta(nextId, materialNames).iconId,
+        iconHref: getMaterialIconMeta(nextId, materialNames).iconHref,
       });
       next.outboundWhitelist = whitelist;
       renderConfig(next);
@@ -1914,6 +3124,33 @@
     function removeWhitelistRow(entryId) {
       var next = readPanelDraftConfig();
       next.outboundWhitelist = normalizeOutboundWhitelist(next.outboundWhitelist || [], materialNames).filter(function (entry) {
+        return Number(entry.id) !== Number(entryId);
+      });
+      renderConfig(next);
+    }
+
+    function addSellBlacklistRow() {
+      var next = readPanelDraftConfig();
+      var blacklist = normalizeMaterialBlocklist(next.sellBlacklist || [], materialNames);
+      var used = new Set(blacklist.map(function (entry) { return Number(entry.id); }));
+      var candidateIds = Object.keys(materialNames).map(function (id) { return Number(id); }).sort(function (a, b) { return a - b; });
+      var nextId = candidateIds.find(function (id) {
+        return !used.has(id);
+      }) || candidateIds[0] || 1;
+      blacklist.push({
+        id: nextId,
+        enabled: true,
+        name: materialNames[nextId] || ('物资 ' + nextId),
+        iconId: getMaterialIconMeta(nextId, materialNames).iconId,
+        iconHref: getMaterialIconMeta(nextId, materialNames).iconHref,
+      });
+      next.sellBlacklist = blacklist;
+      renderConfig(next);
+    }
+
+    function removeSellBlacklistRow(entryId) {
+      var next = readPanelDraftConfig();
+      next.sellBlacklist = normalizeMaterialBlocklist(next.sellBlacklist || [], materialNames).filter(function (entry) {
         return Number(entry.id) !== Number(entryId);
       });
       renderConfig(next);
@@ -1928,6 +3165,13 @@
       }
       if (action === 'remove-whitelist-row') {
         removeWhitelistRow(entryId);
+      }
+      if (action === 'add-sell-blacklist-row') {
+        addSellBlacklistRow();
+        return;
+      }
+      if (action === 'remove-sell-blacklist-row') {
+        removeSellBlacklistRow(entryId);
       }
     }
 
@@ -2081,10 +3325,18 @@
     }
 
     var api = {
+      version: APP_VERSION,
       normalizeText: normalizeText,
       parseNumber: parseNumber,
       pickInitialChain: pickInitialChain,
       reduceResupplyDays: reduceResupplyDays,
+      getAtomicActions: getAtomicActions,
+      runAtomicAction: runAtomicAction,
+      getShipSupportMaterials: getShipSupportMaterials,
+      planShipSupportMaterialRestock: planShipSupportMaterialRestock,
+      planExchangeInventorySellBatch: planExchangeInventorySellBatch,
+      calculateSellOfferPrice: calculateSellOfferPrice,
+      validateSellOfferBeforeSubmit: validateSellOfferBeforeSubmit,
       createMemoryStorage: createMemoryStorage,
       createBaseStore: createBaseStore,
       createHistoryStore: createHistoryStore,
@@ -2092,8 +3344,35 @@
       collectOutboundBatch: collectOutboundBatch,
       collectBatchFromWarehouse: collectBatchFromWarehouse,
       inferShipLocation: inferShipLocation,
+      findDestinationSuggestionByText: function (docRef, text) {
+        return findDestinationSuggestionByText(docRef, text);
+      },
+      findUnloadOnArrivalCheckbox: function (docRef) {
+        return findUnloadOnArrivalCheckbox(docRef);
+      },
+      findButtonByIconHref: findButtonByIconHref,
+      clickExchangeMaterialRowInDocument: clickExchangeMaterialRowInDocument,
+      clickExchangeWarehouseSellButtonInDocument: clickExchangeWarehouseSellButtonInDocument,
+      setTradeAmountInDocument: setTradeAmountInDocument,
+      clickFinalBuyButtonInDocument: clickFinalBuyButtonInDocument,
+      clickSellTabInDocument: clickSellTabInDocument,
+      readLowestOfferPriceInDocument: readLowestOfferPriceInDocument,
+      clickLowestSellOfferRowInDocument: clickLowestSellOfferRowInDocument,
+      setSellOfferAmountInDocument: setSellOfferAmountInDocument,
+      readSellOfferAmountInDocument: readSellOfferAmountInDocument,
+      setSellOfferPriceInDocument: setSellOfferPriceInDocument,
+      readSellOfferPriceInDocument: readSellOfferPriceInDocument,
+      stepDownSellOfferPriceInDocument: stepDownSellOfferPriceInDocument,
+      clickCreateOfferButtonInDocument: clickCreateOfferButtonInDocument,
+      _testSellBatchOnExchange: sellBatchOnExchange,
+      _testRenderConfig: renderConfig,
+      _testBuildAtomicActionsHtml: buildAtomicActionsHtml,
       findPriceForMaterial: findPriceForMaterial,
+      getMaterialIconMeta: function (materialId, entry) {
+        return getMaterialIconMeta(materialId, defaultMaterialNames(), entry);
+      },
       normalizeOutboundWhitelist: normalizeOutboundWhitelist,
+      normalizeMaterialBlocklist: normalizeMaterialBlocklist,
       resolveStatusText: resolveStatusText,
       resolveAutoWaitMs: resolveAutoWaitMs,
       resolveLoopWaitMs: resolveLoopWaitMs,
@@ -2103,6 +3382,9 @@
         return start();
       },
       constants: {
+        appVersion: APP_VERSION,
+        materialAtlasHref: MATERIAL_ATLAS_HREF,
+        materialNames: defaultMaterialNames(),
         defaults: deepClone(DEFAULTS),
         saleButtonTexts: deepClone(SALE_BUTTON_TEXTS),
         buyButtonTexts: deepClone(BUY_BUTTON_TEXTS),
