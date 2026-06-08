@@ -85,6 +85,95 @@ function createTradePanelDoc() {
   };
 }
 
+function createWishlistBuyOrderDoc(order) {
+  const searchInput = {
+    type: 'search',
+    value: '',
+    getAttribute(name) {
+      if (name === 'placeholder') {
+        return 'Search material';
+      }
+      if (name === 'aria-label') {
+        return 'Search';
+      }
+      return '';
+    },
+    getClientRects() {
+      return [{}];
+    },
+    focus() {},
+    dispatchEvent(event) {
+      if (!event || event.type === 'input') {
+        order.push('search:' + this.value);
+      }
+    }
+  };
+  const quantityInput = {
+    type: 'number',
+    value: '',
+    getAttribute() {
+      return '';
+    },
+    getClientRects() {
+      return [{}];
+    },
+    focus() {},
+    dispatchEvent(event) {
+      if (!event || event.type === 'input') {
+        order.push('amount:' + this.value);
+      }
+    }
+  };
+  const finalBuyButton = {
+    textContent: 'Buy',
+    innerText: 'Buy',
+    innerHTML: '<svg><use href="#arrow-down-to-line"></use></svg> Buy',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      order.push('buy');
+    }
+  };
+  return {
+    searchInput,
+    quantityInput,
+    getElementById(id) {
+      return id === 'matSearch' ? searchInput : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'input, textarea') {
+        return [searchInput, quantityInput];
+      }
+      if (selector === 'tr, [role="row"], .mat-row, .mat-item') {
+        return [{
+          textContent: searchInput.value,
+          innerText: searchInput.value,
+          getClientRects() {
+            return [{}];
+          },
+          click() {
+            order.push('row:' + searchInput.value);
+          }
+        }];
+      }
+      if (selector === 'input[type="number"], input') {
+        return [quantityInput];
+      }
+      if (selector === 'button') {
+        return [finalBuyButton];
+      }
+      return [];
+    },
+    querySelector(selector) {
+      if (selector === 'input[type="search"], input[placeholder*="Search"], input[placeholder*="搜索"]') {
+        return searchInput;
+      }
+      return null;
+    }
+  };
+}
+
 function createExchangeRowsDoc() {
   const containmentRow = {
     textContent: 'Antimatter Containment 6,400.00$',
@@ -422,6 +511,127 @@ function createFirstOfferRowOrderDoc() {
   };
 }
 
+function createShipMaintenanceDoc(options = {}) {
+  const popupText = options.popupText || 'Refuel ship Tank173 / 210Warehouse2,956';
+  const trigger = {
+    textContent: options.triggerText || 'Refuel',
+    innerText: options.triggerText || 'Refuel',
+    clicked: false,
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      this.clicked = true;
+      doc.popupOpen = true;
+    }
+  };
+  const amountInput = {
+    type: 'number',
+    value: '',
+    max: options.max || '2956',
+    getAttribute(name) {
+      return name === 'max' ? this.max : '';
+    },
+    focus() {},
+    dispatchEvent() {}
+  };
+  const rangeInput = {
+    type: 'range',
+    value: '',
+    max: options.max || '2956',
+    getAttribute(name) {
+      return name === 'max' ? this.max : '';
+    },
+    focus() {},
+    dispatchEvent() {}
+  };
+  const cancelButton = {
+    textContent: '',
+    innerText: '',
+    className: 'btn btn-secondary me-1',
+    getClientRects() {
+      return [{}];
+    },
+    click() {}
+  };
+  const confirmButton = {
+    textContent: '',
+    innerText: '',
+    className: 'btn btn-primary',
+    clicked: false,
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      this.clicked = true;
+    }
+  };
+  const popup = {
+    textContent: popupText,
+    innerText: popupText,
+    querySelectorAll(selector) {
+      if (selector === 'input[type="number"], input') {
+        return [amountInput, rangeInput];
+      }
+      if (selector === 'button') {
+        return [cancelButton, confirmButton];
+      }
+      return [];
+    }
+  };
+  const doc = {
+    popupOpen: false,
+    trigger,
+    amountInput,
+    rangeInput,
+    cancelButton,
+    confirmButton,
+    popup,
+    querySelectorAll(selector) {
+      if (selector === 'button[data-popup-id="shipRefuel"]' && options.mode !== 'repair' && !options.missingTrigger) {
+        return [trigger];
+      }
+      if (selector === 'button[data-popup-id="shipRepair"]' && options.mode === 'repair' && !options.missingTrigger) {
+        return [trigger];
+      }
+      if (selector === '.popover') {
+        return this.popupOpen && !options.missingPopup ? [popup] : [];
+      }
+      return [];
+    }
+  };
+  return doc;
+}
+
+function createShipInfoModalDoc(options = {}) {
+  const shipLink = {
+    textContent: options.shipName || 'ship-09',
+    innerText: options.shipName || 'ship-09',
+    clicked: false,
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      this.clicked = true;
+      doc.modalOpen = true;
+    }
+  };
+  const doc = {
+    modalOpen: !!options.modalOpen,
+    shipLink,
+    querySelectorAll(selector) {
+      if (selector === '.modal.show, .modal') {
+        return this.modalOpen ? [{ textContent: 'Ships ' + (options.shipName || 'ship-09') + ' Refuel Repair' }] : [];
+      }
+      if (selector === 'span.link-primary, .link-primary') {
+        return options.missingShip ? [] : [shipLink];
+      }
+      return [];
+    }
+  };
+  return doc;
+}
+
 function createMixedPricePageDoc() {
   const inventoryCard = {
     textContent: 'Exchange Warehouse Ship Repair Kit 2,000 1,500t $2.8m Antimatter Containment 2,000 $12.8m',
@@ -521,7 +731,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.26');
+  assert.equal(api.version, '0.1.28');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -567,8 +777,9 @@ test('面板主体内容区域可滚动，日志固定在底部', () => {
   assert.match(html, /id="gtap-scroll-body"/);
   assert.match(html, /id="gtap-fixed-log"/);
   assert.ok(html.indexOf('id="gtap-scroll-body"') < html.indexOf('id="gtap-fixed-log"'));
-  assert.match(html, /overflow:auto/);
-  assert.match(html, /min-height:0/);
+  assert.match(html, /id="gtap-panel-body" style="[^"]*flex:1 1 auto[^"]*overflow:hidden/);
+  assert.match(html, /id="gtap-scroll-body" style="[^"]*flex:1 1 auto[^"]*overflow:auto/);
+  assert.match(html, /id="gtap-fixed-log" style="[^"]*flex:0 0 auto/);
 });
 
 test('老卖货配置只渲染白名单，一键卖货配置只渲染黑名单', () => {
@@ -806,6 +1017,89 @@ test('读取 wishlist 原子功能会统计条目数量、总数量和估算价�
   );
 });
 
+test('购买 wishlist 前会按估算总价校验现金是否足够', () => {
+  const api = createGtAutopilot();
+  assert.deepEqual(api.assertWishlistPurchaseAffordable({
+    company: { cash: 500 },
+    wishlistSummary: { estimatedCost: 290 }
+  }), {
+    availableCash: 500,
+    estimatedCost: 290
+  });
+  assert.throws(
+    () => api.assertWishlistPurchaseAffordable({
+      company: { cash: 100 },
+      wishlistSummary: { estimatedCost: 290 }
+    }),
+    /资金不足/
+  );
+});
+
+test('清空基地 wishlist 后仍有残留条目时会失败', async () => {
+  const reads = [
+    [{ id: 12, name: 'Basic Rations', amount: 10 }],
+    [{ id: 12, name: 'Basic Rations', amount: 10 }]
+  ];
+  const api = createGtAutopilot({
+    setTimeout(resolve) {
+      resolve();
+    },
+    __testHooks: {
+      resolveWishlistIdForBase: () => Promise.resolve(501),
+      readWishlistRowsFromApi: () => Promise.resolve(reads.shift() || []),
+      clearWishlistFromUi: () => Promise.resolve(true)
+    }
+  });
+
+  await assert.rejects(
+    api._testRunWishlistClearBaseWishlist({ base: { id: 20437, name: '0-冶炼 合金09', planetId: 501 } }),
+    /清空后 wishlist 仍有 1 种物资/
+  );
+});
+
+test('购买 wishlist 会按 wishlist 条目顺序执行搜索、选择、数量和 Buy', async () => {
+  const order = [];
+  const doc = createWishlistBuyOrderDoc(order);
+  const api = createGtAutopilot({
+    document: doc,
+    Event: class TestEvent {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    setTimeout(resolve) {
+      resolve();
+    }
+  });
+  const wishlist = [
+    { id: 12, name: 'Basic Rations', amount: 10 },
+    { id: 16, name: 'Drinking Water', amount: 20 },
+    { id: 113, name: 'Ship Repair Kit', amount: 30 }
+  ];
+
+  const summary = await api._testBuyWishlistItemsFromUi(wishlist);
+
+  assert.deepEqual(summary, [
+    { name: 'Basic Rations', amount: 10 },
+    { name: 'Drinking Water', amount: 20 },
+    { name: 'Ship Repair Kit', amount: 30 }
+  ]);
+  assert.deepEqual(order, [
+    'search:Basic Rations',
+    'row:Basic Rations',
+    'amount:10',
+    'buy',
+    'search:Drinking Water',
+    'row:Drinking Water',
+    'amount:20',
+    'buy',
+    'search:Ship Repair Kit',
+    'row:Ship Repair Kit',
+    'amount:30',
+    'buy'
+  ]);
+});
+
 test('转移到飞船原子功能会把 wishlist 条目转成装船批次', () => {
   const api = createGtAutopilot();
   const result = api.planWishlistTransferBatch({
@@ -847,7 +1141,8 @@ test('补油和修理原子功能会生成安全检查计划', () => {
     ship: { name: 'ship-09' },
     materialName: 'Antimatter',
     mode: 'fuel',
-    uiAction: 'manual-safe-check'
+    popupId: 'shipRefuel',
+    uiAction: 'ship-maintenance-popup'
   });
   assert.deepEqual(api.planWishlistShipMaintenance({
     shipInfo: { location: 'exchange', ship: { name: 'ship-09' } }
@@ -855,7 +1150,8 @@ test('补油和修理原子功能会生成安全检查计划', () => {
     ship: { name: 'ship-09' },
     materialName: 'Ship Repair Kit',
     mode: 'repair',
-    uiAction: 'manual-safe-check'
+    popupId: 'shipRepair',
+    uiAction: 'ship-maintenance-popup'
   });
 });
 
@@ -869,6 +1165,75 @@ test('补油和修理原子功能要求飞船在交易所', () => {
     () => api.planWishlistShipMaintenance({ shipInfo: { location: 'exchange', ship: { name: 'ship' } } }, 'unknown'),
     /未知维护模式/
   );
+});
+
+test('飞船补油 helper 会打开 Refuel 弹层、填最大数量并点击确认', () => {
+  const api = createGtAutopilot();
+  const doc = createShipMaintenanceDoc({ mode: 'fuel', max: '2956' });
+
+  const result = api.performShipMaintenanceInDocument(doc, 'fuel');
+
+  assert.deepEqual(result, {
+    mode: 'fuel',
+    popupId: 'shipRefuel',
+    amount: 2956
+  });
+  assert.equal(doc.trigger.clicked, true);
+  assert.equal(doc.amountInput.value, '2956');
+  assert.equal(doc.confirmButton.clicked, true);
+});
+
+test('修理飞船 helper 会打开 Repair 弹层、填最大数量并点击确认', () => {
+  const api = createGtAutopilot();
+  const doc = createShipMaintenanceDoc({ mode: 'repair', max: '1900', triggerText: 'Repair', popupText: 'Repair ship Condition98.7% 100.0%Kits to full100Warehouse1,900' });
+
+  const result = api.performShipMaintenanceInDocument(doc, 'repair');
+
+  assert.deepEqual(result, {
+    mode: 'repair',
+    popupId: 'shipRepair',
+    amount: 1900
+  });
+  assert.equal(doc.trigger.clicked, true);
+  assert.equal(doc.amountInput.value, '1900');
+  assert.equal(doc.confirmButton.clicked, true);
+});
+
+test('飞船补油和修理 helper 缺入口或库存不足时返回明确失败', () => {
+  const api = createGtAutopilot();
+  assert.throws(
+    () => api.performShipMaintenanceInDocument(createShipMaintenanceDoc({ missingTrigger: true }), 'fuel'),
+    /未找到飞船补油入口/
+  );
+  assert.throws(
+    () => api.performShipMaintenanceInDocument(createShipMaintenanceDoc({ max: '0', popupText: 'Refuel ship Tank210 / 210Warehouse0' }), 'fuel'),
+    /缺少 Antimatter/
+  );
+  assert.throws(
+    () => api.performShipMaintenanceInDocument(createShipMaintenanceDoc({ mode: 'repair', max: '0', triggerText: 'Repair', popupText: 'Repair ship Condition98.7% 100.0%Kits to full100Warehouse0' }), 'repair'),
+    /缺少 Ship Repair Kit/
+  );
+});
+
+test('飞船维护前会按飞船名打开飞船信息弹窗', () => {
+  const api = createGtAutopilot();
+  const doc = createShipInfoModalDoc({ shipName: '200000 反物质-09' });
+
+  assert.equal(api.openShipInfoModalInDocument(doc, { name: '200000 反物质-09' }), true);
+  assert.equal(doc.shipLink.clicked, true);
+});
+
+test('飞船信息弹窗已打开时不会重复点击飞船列表', () => {
+  const api = createGtAutopilot();
+  const doc = createShipInfoModalDoc({ shipName: '200000 反物质-09', modalOpen: true });
+
+  assert.equal(api.openShipInfoModalInDocument(doc, { name: '200000 反物质-09' }), true);
+  assert.equal(doc.shipLink.clicked, false);
+});
+
+test('找不到飞船名称时打开飞船信息弹窗会失败', () => {
+  const api = createGtAutopilot();
+  assert.equal(api.openShipInfoModalInDocument(createShipInfoModalDoc({ missingShip: true }), { name: 'ship-404' }), false);
 });
 
 test('发船回基地原子功能会生成返航计划', () => {

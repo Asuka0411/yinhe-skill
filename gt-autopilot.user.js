@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.26
+// @version      0.1.28
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.26';
+  var APP_VERSION = '0.1.28';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -304,6 +304,25 @@
     };
   }
 
+  function companyCashOf(company) {
+    var cash = Number(company && (company.cash != null ? company.cash : company.credits != null ? company.credits : company.money));
+    return Number.isFinite(cash) ? cash : 0;
+  }
+
+  function assertWishlistPurchaseAffordable(input) {
+    var company = input && input.company;
+    var summary = input && input.wishlistSummary || {};
+    var availableCash = companyCashOf(company);
+    var estimatedCost = Number(summary.estimatedCost || 0);
+    if (estimatedCost > 0 && availableCash > 0 && estimatedCost > availableCash) {
+      throw new Error('资金不足：需要 ' + estimatedCost + '，当前 ' + availableCash);
+    }
+    return {
+      availableCash: availableCash,
+      estimatedCost: estimatedCost,
+    };
+  }
+
   function planWishlistTransferBatch(snapshot, rows) {
     var shipInfo = snapshot && snapshot.shipInfo || {};
     var ship = shipInfo.ship;
@@ -370,14 +389,15 @@
       ship: ship,
       materialName: materialName,
       mode: normalizedMode,
-      uiAction: 'manual-safe-check',
+      popupId: normalizedMode === 'fuel' ? 'shipRefuel' : 'shipRepair',
+      uiAction: 'ship-maintenance-popup',
     };
   }
 
   function buildPanelBodyHtml(atomicButtonsHtml) {
     return [
-      '<div id="gtap-panel-body" style="display:flex;flex-direction:column;gap:10px;min-height:0;">',
-      '<div id="gtap-scroll-body" style="min-height:0;max-height:calc(100vh - 360px);overflow:auto;padding-right:4px;">',
+      '<div id="gtap-panel-body" style="display:flex;flex:1 1 auto;flex-direction:column;gap:10px;min-height:0;overflow:hidden;">',
+      '<div id="gtap-scroll-body" style="flex:1 1 auto;min-height:0;overflow:auto;padding-right:4px;">',
       '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:10px;">',
       '<label style="display:flex;flex-direction:column;gap:4px;min-width:0;">',
       '<span style="opacity:.8;">API Key</span>',
@@ -1293,6 +1313,7 @@
   function createApp(env) {
     var win = env && env.window ? env.window : root;
     var doc = env && env.document ? env.document : root.document;
+    var testHooks = env && env.__testHooks || {};
     var storage = resolveStorage();
     var apiClient = createApiClient(win);
     var materialNames = defaultMaterialNames();
@@ -1439,6 +1460,10 @@
         'right:16px',
         'bottom:16px',
         'width:380px',
+        'max-height:calc(100vh - 32px)',
+        'display:flex',
+        'flex-direction:column',
+        'overflow:hidden',
         'z-index:999999',
         'background:rgba(20,24,32,0.96)',
         'border:1px solid rgba(255,255,255,0.14)',
@@ -1861,15 +1886,18 @@
 
     function runWishlistClearBaseWishlist(snapshot) {
       var base = snapshot && snapshot.base;
-      return resolveWishlistIdForBase(base).then(function (wishlistId) {
+      var resolveWishlistId = testHooks.resolveWishlistIdForBase || resolveWishlistIdForBase;
+      var readWishlistRows = testHooks.readWishlistRowsFromApi || readWishlistRowsFromApi;
+      var clearWishlist = testHooks.clearWishlistFromUi || clearWishlistFromUi;
+      return resolveWishlistId(base).then(function (wishlistId) {
         if (!wishlistId) {
           throw new Error('未解析到当前基地 wishlist');
         }
-        return readWishlistRowsFromApi(base).then(function (beforeRows) {
+        return readWishlistRows(base).then(function (beforeRows) {
           pushStep('清空前 wishlist', beforeRows.length + ' 种物资');
-          return clearWishlistFromUi().then(function () {
+          return clearWishlist().then(function () {
             return wait(500).then(function () {
-              return readWishlistRowsFromApi(base).then(function (afterRows) {
+              return readWishlistRows(base).then(function (afterRows) {
                 if (afterRows.length) {
                   throw new Error('清空后 wishlist 仍有 ' + afterRows.length + ' 种物资');
                 }
@@ -1906,7 +1934,14 @@
     function runWishlistBuyWishlist(snapshot) {
       return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
         var summary = planWishlistRowsSummary(rows);
+        var affordable = assertWishlistPurchaseAffordable({
+          company: snapshot && snapshot.company,
+          wishlistSummary: summary,
+        });
         pushStep('购买前 wishlist', summary.itemCount + ' 种，估算总价 ' + summary.estimatedCost);
+        if (summary.estimatedCost > 0) {
+          pushStep('资金检查', '可用 ' + affordable.availableCash + '，预计 ' + affordable.estimatedCost);
+        }
         return navigateToExchangePage().then(function () {
           return buyWishlistItemsFromUi(summary.rows);
         }).then(function (buySummary) {
@@ -1951,8 +1986,12 @@
     function runWishlistShipMaintenance(snapshot, mode) {
       var plan = planWishlistShipMaintenance(snapshot, mode);
       pushStep(plan.mode === 'fuel' ? '飞船补油' : '修理飞船', plan.ship.name + '，需要使用 ' + plan.materialName);
-      pushStep('安全检查', '真实补油/修理按钮尚未校准，本步骤只做前置检查，不点击未知控件');
-      return Promise.resolve(plan);
+      if (!openShipInfoModalInDocument(doc, plan.ship)) {
+        throw new Error('未找到飞船信息入口：' + normalizeText(plan.ship.name || plan.ship.shipName || '未命名飞船'));
+      }
+      var result = performShipMaintenanceInDocument(doc, plan.mode);
+      pushStep(plan.mode === 'fuel' ? '补油完成' : '修理完成', plan.materialName + ' x ' + result.amount);
+      return Promise.resolve(Object.assign({}, plan, result));
     }
 
     function runWishlistAtomicAction(action, snapshot) {
@@ -3001,6 +3040,130 @@
       });
     }
 
+    function findShipMaintenancePlan(mode) {
+      var normalizedMode = normalizeText(mode);
+      if (normalizedMode === 'fuel') {
+        return {
+          mode: 'fuel',
+          popupId: 'shipRefuel',
+          materialName: 'Antimatter',
+          entryError: '未找到飞船补油入口',
+        };
+      }
+      if (normalizedMode === 'repair') {
+        return {
+          mode: 'repair',
+          popupId: 'shipRepair',
+          materialName: 'Ship Repair Kit',
+          entryError: '未找到修理飞船入口',
+        };
+      }
+      throw new Error('未知维护模式：' + normalizedMode);
+    }
+
+    function findLatestPopoverInDocument(docRef) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return null;
+      }
+      var popovers = Array.prototype.slice.call(docRef.querySelectorAll('.popover'));
+      return popovers.length ? popovers[popovers.length - 1] : null;
+    }
+
+    function openShipInfoModalInDocument(docRef, ship) {
+      var shipName = normalizeText(ship && (ship.name || ship.shipName));
+      if (!docRef || !shipName || typeof docRef.querySelectorAll !== 'function') {
+        return false;
+      }
+      var modals = Array.prototype.slice.call(docRef.querySelectorAll('.modal.show, .modal'));
+      var hasOpenModal = modals.some(function (modal) {
+        return normalizeText(modal && (modal.textContent || modal.innerText || '')).indexOf(shipName) >= 0;
+      });
+      if (hasOpenModal) {
+        return true;
+      }
+      var links = Array.prototype.slice.call(docRef.querySelectorAll('span.link-primary, .link-primary'));
+      for (var i = 0; i < links.length; i += 1) {
+        var text = normalizeText(links[i] && (links[i].textContent || links[i].innerText || ''));
+        if (text === shipName) {
+          return clickElement(links[i]);
+        }
+      }
+      return false;
+    }
+
+    function parseWarehouseAmountFromText(text) {
+      var normalized = normalizeText(text);
+      var match = normalized.match(/Warehouse\s*([0-9][0-9,]*)/i);
+      return match ? parseNumber(match[1], 0) : 0;
+    }
+
+    function resolveShipMaintenanceAmount(popup, amountInput) {
+      var maxValue = parseNumber(
+        amountInput && amountInput.getAttribute && amountInput.getAttribute('max') != null
+          ? amountInput.getAttribute('max')
+          : amountInput && amountInput.max,
+        0
+      );
+      if (maxValue > 0) {
+        return Math.floor(maxValue);
+      }
+      return Math.floor(parseWarehouseAmountFromText(popup && (popup.textContent || popup.innerText || '')));
+    }
+
+    function clickShipMaintenanceConfirmButton(popup) {
+      if (!popup || typeof popup.querySelectorAll !== 'function') {
+        return false;
+      }
+      var buttons = Array.prototype.slice.call(popup.querySelectorAll('button')).filter(function (button) {
+        var className = String(button && button.className || '');
+        return button && (!button.getClientRects || button.getClientRects().length) && className.indexOf('btn-close') < 0;
+      });
+      for (var i = buttons.length - 1; i >= 0; i -= 1) {
+        var className = String(buttons[i].className || '');
+        if (className.indexOf('btn-primary') >= 0) {
+          return clickElement(buttons[i]);
+        }
+      }
+      return buttons.length ? clickElement(buttons[buttons.length - 1]) : false;
+    }
+
+    function performShipMaintenanceInDocument(docRef, mode) {
+      var plan = findShipMaintenancePlan(mode);
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        throw new Error(plan.entryError);
+      }
+      var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button[data-popup-id="' + plan.popupId + '"]'));
+      var entryButton = buttons.length === 1 ? buttons[0] : null;
+      if (!entryButton) {
+        throw new Error(plan.entryError);
+      }
+      clickElement(entryButton);
+      var popup = findLatestPopoverInDocument(docRef);
+      if (!popup) {
+        throw new Error('未打开飞船维护弹层：' + plan.materialName);
+      }
+      var inputs = visibleFormInputs(popup);
+      var amountInput = inputs.filter(function (input) {
+        return input && input.type === 'number';
+      })[0] || inputs[0];
+      if (!amountInput) {
+        throw new Error('未找到飞船维护数量输入框：' + plan.materialName);
+      }
+      var amount = resolveShipMaintenanceAmount(popup, amountInput);
+      if (amount <= 0) {
+        throw new Error('缺少 ' + plan.materialName);
+      }
+      setInputValue(amountInput, String(amount));
+      if (!clickShipMaintenanceConfirmButton(popup)) {
+        throw new Error('未找到飞船维护确认按钮：' + plan.materialName);
+      }
+      return {
+        mode: plan.mode,
+        popupId: plan.popupId,
+        amount: amount,
+      };
+    }
+
     function setSellOfferAmountInDocument(docRef, amount) {
       if (!docRef) {
         return false;
@@ -3791,6 +3954,7 @@
       planWishlistReadCurrentBase: planWishlistReadCurrentBase,
       planWishlistShipAtExchange: planWishlistShipAtExchange,
       planWishlistRowsSummary: planWishlistRowsSummary,
+      assertWishlistPurchaseAffordable: assertWishlistPurchaseAffordable,
       planWishlistTransferBatch: planWishlistTransferBatch,
       planWishlistSendShipHome: planWishlistSendShipHome,
       planWishlistShipMaintenance: planWishlistShipMaintenance,
@@ -3814,6 +3978,8 @@
       findButtonByIconHref: findButtonByIconHref,
       clickExchangeMaterialRowInDocument: clickExchangeMaterialRowInDocument,
       clickExchangeWarehouseSellButtonInDocument: clickExchangeWarehouseSellButtonInDocument,
+      openShipInfoModalInDocument: openShipInfoModalInDocument,
+      performShipMaintenanceInDocument: performShipMaintenanceInDocument,
       setTradeAmountInDocument: setTradeAmountInDocument,
       clickFinalBuyButtonInDocument: clickFinalBuyButtonInDocument,
       clickSellTabInDocument: clickSellTabInDocument,
@@ -3825,6 +3991,8 @@
       readSellOfferPriceInDocument: readSellOfferPriceInDocument,
       stepDownSellOfferPriceInDocument: stepDownSellOfferPriceInDocument,
       clickCreateOfferButtonInDocument: clickCreateOfferButtonInDocument,
+      _testRunWishlistClearBaseWishlist: runWishlistClearBaseWishlist,
+      _testBuyWishlistItemsFromUi: buyWishlistItemsFromUi,
       _testSellBatchOnExchange: sellBatchOnExchange,
       _testRenderConfig: renderConfig,
       _testBuildAtomicActionsHtml: buildAtomicActionsHtml,
