@@ -521,7 +521,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.25');
+  assert.equal(api.version, '0.1.26');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -616,7 +616,7 @@ test('原子功能按钮定义包含加油、修飞船、修建筑、补修理�
   const api = createGtAutopilot();
   assert.deepEqual(api.getAtomicActions(), [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
-    { action: 'buy_wishlist', label: '一键购买 wishlist' },
+    { action: 'buy_wishlist', label: '一键购买 wishlist', status: 'ready' },
     { action: 'fuel_ship', label: '一键加油' },
     { action: 'repair_ship', label: '一键修飞船' },
     { action: 'repair_base_buildings', label: '一键修基地建筑' },
@@ -654,6 +654,27 @@ test('清空、创建、打开交易所、购买、转移、补油修理和发�
   assert.equal(byAction.wishlist_fuel_ship, 'ready');
   assert.equal(byAction.wishlist_repair_ship, 'ready');
   assert.equal(byAction.wishlist_send_ship_home, 'ready');
+});
+
+test('一键购买 wishlist 主流程只编排读取基地、读取 wishlist、打开交易所和购买', () => {
+  const api = createGtAutopilot();
+  assert.deepEqual(api.getBuyWishlistWorkflowSteps(), [
+    'wishlist_read_current_base',
+    'wishlist_read_wishlist',
+    'wishlist_open_exchange',
+    'wishlist_buy_wishlist'
+  ]);
+  assert.deepEqual(api.runAtomicAction('buy_wishlist'), {
+    action: 'buy_wishlist',
+    label: '一键购买 wishlist',
+    status: 'ready',
+    message: '一键购买 wishlist：可测试'
+  });
+});
+
+test('一键补货回运主流程按 11 个原子步骤完整编排', () => {
+  const api = createGtAutopilot();
+  assert.deepEqual(api.getWishlistResupplyWorkflowSteps(), api.getWishlistResupplyAtomicSteps().map((entry) => entry.action));
 });
 
 test('补货回运原子步骤按钮当前返回待接入状态', () => {

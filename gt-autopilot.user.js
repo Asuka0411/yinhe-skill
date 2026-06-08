@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.25
+// @version      0.1.26
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,11 +61,11 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.25';
+  var APP_VERSION = '0.1.26';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
-    { action: 'buy_wishlist', label: '一键购买 wishlist' },
+    { action: 'buy_wishlist', label: '一键购买 wishlist', status: 'ready' },
     { action: 'fuel_ship', label: '一键加油' },
     { action: 'repair_ship', label: '一键修飞船' },
     { action: 'repair_base_buildings', label: '一键修基地建筑' },
@@ -84,6 +84,15 @@
     { action: 'wishlist_repair_ship', label: '修理飞船', status: 'ready' },
     { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'ready' },
   ];
+  var BUY_WISHLIST_WORKFLOW_STEPS = [
+    'wishlist_read_current_base',
+    'wishlist_read_wishlist',
+    'wishlist_open_exchange',
+    'wishlist_buy_wishlist',
+  ];
+  var WISHLIST_RESUPPLY_WORKFLOW_STEPS = WISHLIST_RESUPPLY_ATOMIC_STEPS.map(function (entry) {
+    return entry.action;
+  });
   var SHIP_SUPPORT_MATERIALS = [
     { id: 149, name: 'Antimatter', targetAmount: 2000, role: 'fuel' },
     { id: 113, name: 'Ship Repair Kit', targetAmount: 2000, role: 'repair' },
@@ -132,6 +141,14 @@
 
   function getWishlistResupplyAtomicSteps() {
     return deepClone(WISHLIST_RESUPPLY_ATOMIC_STEPS);
+  }
+
+  function getBuyWishlistWorkflowSteps() {
+    return deepClone(BUY_WISHLIST_WORKFLOW_STEPS);
+  }
+
+  function getWishlistResupplyWorkflowSteps() {
+    return deepClone(WISHLIST_RESUPPLY_WORKFLOW_STEPS);
   }
 
   function findAtomicAction(action) {
@@ -1975,6 +1992,58 @@
       return Promise.resolve(runAtomicAction(action));
     }
 
+    function runBuyWishlistWorkflow(snapshot) {
+      var steps = getBuyWishlistWorkflowSteps();
+      pushStep('一键购买 wishlist', '流程=' + steps.map(function (step) {
+        var entry = findAtomicAction(step);
+        return entry ? entry.label : step;
+      }).join(' -> '));
+      return runWishlistReadCurrentBase(snapshot).then(function () {
+        return runWishlistReadWishlist(snapshot);
+      }).then(function (wishlistSummary) {
+        return runWishlistOpenExchange(snapshot).then(function () {
+          return runWishlistBuyWishlist(snapshot).then(function (buySummary) {
+            return {
+              workflow: steps,
+              wishlist: wishlistSummary,
+              bought: buySummary.bought,
+            };
+          });
+        });
+      });
+    }
+
+    function ensureNotStopped() {
+      if (state.stopped) {
+        throw new Error(STOP_REASON);
+      }
+    }
+
+    function runWishlistResupplyWorkflow(snapshot) {
+      var steps = getWishlistResupplyWorkflowSteps();
+      var summaries = [];
+      pushStep('一键补货回运', '流程=' + steps.map(function (step) {
+        var entry = findAtomicAction(step);
+        return entry ? entry.label : step;
+      }).join(' -> '));
+      return steps.reduce(function (promise, step) {
+        return promise.then(function () {
+          ensureNotStopped();
+          return runWishlistAtomicAction(step, snapshot).then(function (summary) {
+            summaries.push({ action: step, summary: summary });
+            return summary;
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        return {
+          next: 'wait',
+          workflow: steps,
+          summaries: summaries,
+          waitMs: DEFAULTS.transportWaitIntervalMs,
+        };
+      });
+    }
+
     function handleAtomicAction(action) {
       var result = runAtomicAction(action);
       if (result.action === 'sell_exchange_inventory') {
@@ -1993,6 +2062,30 @@
               label: result.label,
               sold: summary.sold,
               plan: summary.plan,
+            });
+          });
+        }).catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('原子功能失败', state.lastError);
+          finishRun('failed', { action: result.action, label: result.label, error: state.lastError });
+        });
+        return;
+      }
+      if (result.action === 'buy_wishlist') {
+        if (state.running) {
+          pushStep('忙碌', '已有任务在运行');
+          return;
+        }
+        readBaseContext().then(function (snapshot) {
+          startRun('atomic_' + result.action);
+          pushStep('原子功能', result.label);
+          savePanelConfig(snapshot);
+          snapshot.config = state.baseStore ? state.baseStore.read() : snapshot.config;
+          return runBuyWishlistWorkflow(snapshot).then(function (summary) {
+            finishRun('success', {
+              action: result.action,
+              label: result.label,
+              summary: summary,
             });
           });
         }).catch(function (error) {
@@ -2135,8 +2228,6 @@
 
     function runResupplyChain(snapshot) {
       var shipInfo = getShipSnapshot(snapshot);
-      var base = snapshot.base || {};
-      var config = snapshot.config || (state.baseStore ? state.baseStore.defaults : deepClone(DEFAULTS));
 
       pushStep('补货链', '位置=' + shipInfo.location);
       if (!shipInfo.ship) {
@@ -2153,26 +2244,7 @@
         return Promise.resolve({ next: 'wait', snapshot: snapshot });
       }
 
-      return openResupplyPage(config.resupplyDays).then(function () {
-        pushStep('页面', '已切到 Resupply');
-        return buildResupplyWishlist(base, config);
-      }).then(function (wishlistResult) {
-        return navigateToExchangePage().then(function () {
-          return buyWishlistItemsFromUi(wishlistResult.wishlist);
-        }).then(function (buySummary) {
-          return moveShipToDestination(shipInfo.ship, base && base.name ? base.name : 'Base').then(function () {
-            pushStep('运输', '已尝试发船回基地');
-            return {
-              next: 'wait',
-              wishlist: wishlistResult.wishlist,
-              reduceResult: wishlistResult.reduceResult,
-              buySummary: buySummary,
-              ship: shipInfo.ship,
-              waitMs: DEFAULTS.transportWaitIntervalMs,
-            };
-          });
-        });
-      });
+      return runWishlistResupplyWorkflow(snapshot);
     }
 
     function runSelectedChain(chain, snapshot) {
@@ -3712,6 +3784,8 @@
       reduceResupplyDays: reduceResupplyDays,
       getAtomicActions: getAtomicActions,
       getWishlistResupplyAtomicSteps: getWishlistResupplyAtomicSteps,
+      getBuyWishlistWorkflowSteps: getBuyWishlistWorkflowSteps,
+      getWishlistResupplyWorkflowSteps: getWishlistResupplyWorkflowSteps,
       runAtomicAction: runAtomicAction,
       getShipSupportMaterials: getShipSupportMaterials,
       planWishlistReadCurrentBase: planWishlistReadCurrentBase,
