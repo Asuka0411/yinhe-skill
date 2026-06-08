@@ -731,7 +731,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.28');
+  assert.equal(api.version, '0.1.29');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -998,8 +998,8 @@ test('检查飞船在交易所原子功能要求飞船位于交易所', () => {
 test('读取 wishlist 原子功能会统计条目数量、总数量和估算价格', () => {
   const api = createGtAutopilot();
   const result = api.planWishlistRowsSummary([
-    { id: 12, name: 'Basic Rations', amount: 10, cost: 110 },
-    { id: 16, name: 'Drinking Water', amount: 12, cost: 180 }
+    { id: 12, name: 'Basic Rations', amount: 10, weight: 1, cost: 110 },
+    { id: 16, name: 'Drinking Water', amount: 12, weight: 2, cost: 180 }
   ]);
 
   assert.deepEqual(result, {
@@ -1007,8 +1007,8 @@ test('读取 wishlist 原子功能会统计条目数量、总数量和估算价�
     totalAmount: 22,
     estimatedCost: 290,
     rows: [
-      { id: 12, name: 'Basic Rations', amount: 10, cost: 110 },
-      { id: 16, name: 'Drinking Water', amount: 12, cost: 180 }
+      { id: 12, name: 'Basic Rations', amount: 10, weight: 1, cost: 110 },
+      { id: 16, name: 'Drinking Water', amount: 12, weight: 2, cost: 180 }
     ]
   });
   assert.throws(
@@ -1130,6 +1130,23 @@ test('转移到飞船原子功能要求飞船在交易所且 wishlist 非空', (
   assert.throws(
     () => api.planWishlistTransferBatch({ shipInfo: { location: 'exchange', ship: { name: 'ship' } } }, []),
     /wishlist 为空/
+  );
+});
+
+test('转移到飞船原子功能会在 wishlist 超出飞船载重时失败', () => {
+  const api = createGtAutopilot();
+
+  assert.throws(
+    () => api.planWishlistTransferBatch({
+      shipInfo: {
+        location: 'exchange',
+        ship: { name: 'ship', capacity: 100 }
+      }
+    }, [
+      { id: 12, name: 'Basic Rations', amount: 80, weight: 1 },
+      { id: 16, name: 'Drinking Water', amount: 30, weight: 1 }
+    ]),
+    /超出飞船载重/
   );
 });
 

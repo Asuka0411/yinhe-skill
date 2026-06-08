@@ -480,11 +480,11 @@
 ### 阶段 8：本地与实机验证
 
 - [x] 更新本地 harness 支持补货回运原子按钮
-- [ ] 在 harness 验证空 wishlist、正常 wishlist、超重、资金不足、飞船不在交易所
+- [x] 在 harness/自动测试验证空 wishlist、正常 wishlist、超重、资金不足、飞船不在交易所
 - [ ] 在真实 Chrome 只做小额可控购买验证
 - [ ] 确认不会误点卖货、不会误发船到错误目的地
-- [ ] 执行 `npm run release:local`
-- [ ] 提交并推送
+- [x] 执行 `npm run release:local`
+- [x] 提交并推送
 
 ## 验收标准
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.28
+// @version      0.1.29
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.28';
+  var APP_VERSION = '0.1.29';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -290,6 +290,7 @@
         id: id,
         name: normalizeText(row.name || ('Material ' + id)),
         amount: amount,
+        weight: Number(row.weight || 0),
         cost: Number(row.cost || 0),
       };
     }).filter(Boolean);
@@ -333,6 +334,13 @@
       throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
     }
     var summary = planWishlistRowsSummary(rows);
+    var capacity = Number(ship.capacity || ship.cargo || ship.maxCargo || ship.maxCapacity || 0);
+    var totalWeight = summary.rows.reduce(function (sum, row) {
+      return sum + (Number(row.weight || 0) * Number(row.amount || 0));
+    }, 0);
+    if (capacity > 0 && totalWeight > capacity) {
+      throw new Error('wishlist 超出飞船载重：需要 ' + totalWeight + '，容量 ' + capacity);
+    }
     return {
       ship: ship,
       batch: summary.rows.map(function (row) {
