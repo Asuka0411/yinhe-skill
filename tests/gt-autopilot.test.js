@@ -521,7 +521,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.23');
+  assert.equal(api.version, '0.1.24');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -628,17 +628,28 @@ test('补货回运原子步骤定义按真实流程排序', () => {
   const api = createGtAutopilot();
   assert.deepEqual(api.getWishlistResupplyAtomicSteps(), [
     { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'pending' },
-    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'pending' },
+    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'ready' },
     { action: 'wishlist_check_ship_at_exchange', label: '检查飞船在交易所', status: 'pending' },
-    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'pending' },
-    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'pending' },
+    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'ready' },
+    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'ready' },
     { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
-    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'pending' },
+    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'ready' },
     { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'pending' },
     { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'pending' },
     { action: 'wishlist_repair_ship', label: '修理飞船', status: 'pending' },
     { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'pending' }
   ]);
+});
+
+test('清空、创建、打开交易所和购买原子步骤标记为可测试', () => {
+  const api = createGtAutopilot();
+  const steps = api.getWishlistResupplyAtomicSteps();
+  const byAction = Object.fromEntries(steps.map((entry) => [entry.action, entry.status]));
+
+  assert.equal(byAction.wishlist_clear_base_wishlist, 'ready');
+  assert.equal(byAction.wishlist_create_resupply_wishlist, 'ready');
+  assert.equal(byAction.wishlist_open_exchange, 'ready');
+  assert.equal(byAction.wishlist_buy_wishlist, 'ready');
 });
 
 test('补货回运原子步骤按钮当前返回待接入状态', () => {
@@ -649,6 +660,35 @@ test('补货回运原子步骤按钮当前返回待接入状态', () => {
     label: '读取当前基地',
     status: 'pending',
     message: '读取当前基地：真实流程待接入'
+  });
+});
+
+test('清空、创建、打开交易所和购买原子步骤入口返回可测试状态', () => {
+  const api = createGtAutopilot();
+
+  assert.deepEqual(api.runAtomicAction('wishlist_clear_base_wishlist'), {
+    action: 'wishlist_clear_base_wishlist',
+    label: '清空基地 wishlist',
+    status: 'ready',
+    message: '清空基地 wishlist：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_create_resupply_wishlist'), {
+    action: 'wishlist_create_resupply_wishlist',
+    label: '创建补给 wishlist',
+    status: 'ready',
+    message: '创建补给 wishlist：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_open_exchange'), {
+    action: 'wishlist_open_exchange',
+    label: '打开交易所',
+    status: 'ready',
+    message: '打开交易所：可测试'
+  });
+  assert.deepEqual(api.runAtomicAction('wishlist_buy_wishlist'), {
+    action: 'wishlist_buy_wishlist',
+    label: '购买 wishlist',
+    status: 'ready',
+    message: '购买 wishlist：可测试'
   });
 });
 

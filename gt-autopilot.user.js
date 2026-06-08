@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.23
+// @version      0.1.24
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.23';
+  var APP_VERSION = '0.1.24';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -73,12 +73,12 @@
   ];
   var WISHLIST_RESUPPLY_ATOMIC_STEPS = [
     { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'pending' },
-    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'pending' },
+    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'ready' },
     { action: 'wishlist_check_ship_at_exchange', label: '检查飞船在交易所', status: 'pending' },
-    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'pending' },
-    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'pending' },
+    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'ready' },
+    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'ready' },
     { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
-    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'pending' },
+    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'ready' },
     { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'pending' },
     { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'pending' },
     { action: 'wishlist_repair_ship', label: '修理飞船', status: 'pending' },
@@ -162,8 +162,8 @@
     return {
       action: entry.action,
       label: entry.label,
-      status: 'pending',
-      message: entry.label + '：真实流程待接入',
+      status: entry.status || 'pending',
+      message: entry.label + (entry.status === 'ready' ? '：可测试' : '：真实流程待接入'),
     };
   }
 
@@ -1772,15 +1772,87 @@
       });
     }
 
-    function runWishlistReadonlyAtomicAction(action, snapshot) {
+    function runWishlistClearBaseWishlist(snapshot) {
+      var base = snapshot && snapshot.base;
+      return resolveWishlistIdForBase(base).then(function (wishlistId) {
+        if (!wishlistId) {
+          throw new Error('未解析到当前基地 wishlist');
+        }
+        return readWishlistRowsFromApi(base).then(function (beforeRows) {
+          pushStep('清空前 wishlist', beforeRows.length + ' 种物资');
+          return clearWishlistFromUi().then(function () {
+            return wait(500).then(function () {
+              return readWishlistRowsFromApi(base).then(function (afterRows) {
+                if (afterRows.length) {
+                  throw new Error('清空后 wishlist 仍有 ' + afterRows.length + ' 种物资');
+                }
+                pushStep('清空基地 wishlist', '已清空 #' + wishlistId);
+                return { wishlistId: wishlistId, clearedCount: beforeRows.length };
+              });
+            });
+          });
+        });
+      });
+    }
+
+    function runWishlistCreateResupplyWishlist(snapshot) {
+      var base = snapshot && snapshot.base;
+      var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.read() : deepClone(DEFAULTS));
+      return openResupplyPage(config.resupplyDays).then(function () {
+        pushStep('页面', '已切到 Resupply');
+        return buildResupplyWishlist(base, config);
+      }).then(function (result) {
+        var rows = result.wishlist || [];
+        var days = result.reduceResult ? result.reduceResult.days : config.resupplyDays;
+        pushStep('创建补给 wishlist', rows.length + ' 种物资，补齐天数 ' + days);
+        return result;
+      });
+    }
+
+    function runWishlistOpenExchange() {
+      return navigateToExchangePage().then(function () {
+        pushStep('打开交易所', '已切换到交易所页面');
+        return { exchangePageReady: true };
+      });
+    }
+
+    function runWishlistBuyWishlist(snapshot) {
+      return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
+        var summary = planWishlistRowsSummary(rows);
+        pushStep('购买前 wishlist', summary.itemCount + ' 种，估算总价 ' + summary.estimatedCost);
+        return navigateToExchangePage().then(function () {
+          return buyWishlistItemsFromUi(summary.rows);
+        }).then(function (buySummary) {
+          pushStep('购买 wishlist', buySummary.length ? ('已购买 ' + buySummary.length + ' 种物资') : '未购买物资');
+          return {
+            wishlist: summary,
+            bought: buySummary,
+          };
+        });
+      });
+    }
+
+    function runWishlistAtomicAction(action, snapshot) {
       if (action === 'wishlist_read_current_base') {
         return runWishlistReadCurrentBase(snapshot);
+      }
+      if (action === 'wishlist_clear_base_wishlist') {
+        return runWishlistClearBaseWishlist(snapshot);
       }
       if (action === 'wishlist_check_ship_at_exchange') {
         return runWishlistCheckShipAtExchange(snapshot);
       }
+      if (action === 'wishlist_create_resupply_wishlist') {
+        return runWishlistCreateResupplyWishlist(snapshot);
+      }
+      if (action === 'wishlist_open_exchange') {
+        return runWishlistOpenExchange(snapshot);
+      }
       if (action === 'wishlist_read_wishlist') {
         return runWishlistReadWishlist(snapshot);
+      }
+      if (action === 'wishlist_buy_wishlist') {
+        return runWishlistBuyWishlist(snapshot);
       }
       return Promise.resolve(runAtomicAction(action));
     }
@@ -1837,8 +1909,12 @@
       }
       if ([
         'wishlist_read_current_base',
+        'wishlist_clear_base_wishlist',
         'wishlist_check_ship_at_exchange',
-        'wishlist_read_wishlist'
+        'wishlist_create_resupply_wishlist',
+        'wishlist_open_exchange',
+        'wishlist_read_wishlist',
+        'wishlist_buy_wishlist'
       ].indexOf(result.action) >= 0) {
         if (state.running) {
           pushStep('忙碌', '已有任务在运行');
@@ -1847,7 +1923,7 @@
         readBaseContext().then(function (snapshot) {
           startRun('atomic_' + result.action);
           pushStep('原子功能', result.label);
-          return runWishlistReadonlyAtomicAction(result.action, snapshot).then(function (summary) {
+          return runWishlistAtomicAction(result.action, snapshot).then(function (summary) {
             finishRun('success', {
               action: result.action,
               label: result.label,
