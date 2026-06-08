@@ -521,7 +521,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.22');
+  assert.equal(api.version, '0.1.23');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -558,6 +558,17 @@ test('一键购买 wishlist 展开面板包含补货回运原子步骤按钮', (
     assert.match(html, new RegExp('data-atomic-action="' + action + '"'));
   });
   assert.ok(html.indexOf('data-atomic-action="wishlist_read_current_base"') < html.indexOf('data-atomic-action="wishlist_send_ship_home"'));
+});
+
+test('面板主体内容区域可滚动，日志固定在底部', () => {
+  const api = createGtAutopilot();
+  const html = api._testBuildPanelBodyHtml();
+
+  assert.match(html, /id="gtap-scroll-body"/);
+  assert.match(html, /id="gtap-fixed-log"/);
+  assert.ok(html.indexOf('id="gtap-scroll-body"') < html.indexOf('id="gtap-fixed-log"'));
+  assert.match(html, /overflow:auto/);
+  assert.match(html, /min-height:0/);
 });
 
 test('老卖货配置只渲染白名单，一键卖货配置只渲染黑名单', () => {
@@ -639,6 +650,71 @@ test('补货回运原子步骤按钮当前返回待接入状态', () => {
     status: 'pending',
     message: '读取当前基地：真实流程待接入'
   });
+});
+
+test('读取当前基地原子功能会生成基地摘要', () => {
+  const api = createGtAutopilot();
+  const result = api.planWishlistReadCurrentBase({
+    base: { id: 20437, name: '0-冶炼 合金09', planetId: 501 },
+    config: { resupplyDays: 7 }
+  }, 501);
+
+  assert.deepEqual(result, {
+    baseId: 20437,
+    baseName: '0-冶炼 合金09',
+    wishlistId: 501,
+    resupplyDays: 7
+  });
+});
+
+test('读取当前基地原子功能缺少基地时会失败', () => {
+  const api = createGtAutopilot();
+  assert.throws(
+    () => api.planWishlistReadCurrentBase({}, 0),
+    /未读取到当前基地/
+  );
+});
+
+test('检查飞船在交易所原子功能要求飞船位于交易所', () => {
+  const api = createGtAutopilot();
+  const result = api.planWishlistShipAtExchange({
+    shipInfo: {
+      location: 'exchange',
+      ship: { name: '200000 反物质-09', locationText: 'Exchange Station' }
+    }
+  });
+
+  assert.deepEqual(result, {
+    shipName: '200000 反物质-09',
+    shipLocation: 'exchange',
+    locationText: 'Exchange Station'
+  });
+  assert.throws(
+    () => api.planWishlistShipAtExchange({ shipInfo: { location: 'base', ship: { name: '200000 反物质-09' } } }),
+    /飞船不在交易所/
+  );
+});
+
+test('读取 wishlist 原子功能会统计条目数量、总数量和估算价格', () => {
+  const api = createGtAutopilot();
+  const result = api.planWishlistRowsSummary([
+    { id: 12, name: 'Basic Rations', amount: 10, cost: 110 },
+    { id: 16, name: 'Drinking Water', amount: 12, cost: 180 }
+  ]);
+
+  assert.deepEqual(result, {
+    itemCount: 2,
+    totalAmount: 22,
+    estimatedCost: 290,
+    rows: [
+      { id: 12, name: 'Basic Rations', amount: 10, cost: 110 },
+      { id: 16, name: 'Drinking Water', amount: 12, cost: 180 }
+    ]
+  });
+  assert.throws(
+    () => api.planWishlistRowsSummary([]),
+    /wishlist 为空/
+  );
 });
 
 test('原子功能当前只有一键卖货标记为已完成', () => {

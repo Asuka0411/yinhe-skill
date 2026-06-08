@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.22
+// @version      0.1.23
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -61,7 +61,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.22';
+  var APP_VERSION = '0.1.23';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -228,6 +228,93 @@
         current: amount,
       };
     }).filter(Boolean);
+  }
+
+  function planWishlistReadCurrentBase(snapshot, wishlistId) {
+    var base = snapshot && snapshot.base;
+    var config = snapshot && snapshot.config || {};
+    var baseId = Number(base && base.id);
+    var baseName = normalizeText(base && base.name);
+    if (!baseId || !baseName) {
+      throw new Error('未读取到当前基地');
+    }
+    return {
+      baseId: baseId,
+      baseName: baseName,
+      wishlistId: Number(wishlistId || base.planetId || base.pId || (base.planet && base.planet.id) || 0),
+      resupplyDays: Number(config.resupplyDays || DEFAULTS.resupplyDays),
+    };
+  }
+
+  function planWishlistShipAtExchange(snapshot) {
+    var shipInfo = snapshot && snapshot.shipInfo || {};
+    var ship = shipInfo.ship;
+    if (!ship) {
+      throw new Error('未找到当前基地对应飞船');
+    }
+    if (shipInfo.location !== 'exchange') {
+      throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
+    }
+    return {
+      shipName: normalizeText(ship.name || ship.shipName || '未命名飞船'),
+      shipLocation: shipInfo.location,
+      locationText: normalizeText(ship.locationText || ship.location || ''),
+    };
+  }
+
+  function planWishlistRowsSummary(rows) {
+    var normalized = (rows || []).map(function (row) {
+      var id = Number(row && row.id);
+      var amount = Number(row && row.amount);
+      if (!id || !amount) {
+        return null;
+      }
+      return {
+        id: id,
+        name: normalizeText(row.name || ('Material ' + id)),
+        amount: amount,
+        cost: Number(row.cost || 0),
+      };
+    }).filter(Boolean);
+    if (!normalized.length) {
+      throw new Error('wishlist 为空');
+    }
+    return {
+      itemCount: normalized.length,
+      totalAmount: normalized.reduce(function (sum, row) { return sum + row.amount; }, 0),
+      estimatedCost: normalized.reduce(function (sum, row) { return sum + row.cost; }, 0),
+      rows: normalized,
+    };
+  }
+
+  function buildPanelBodyHtml(atomicButtonsHtml) {
+    return [
+      '<div id="gtap-panel-body" style="display:flex;flex-direction:column;gap:10px;min-height:0;">',
+      '<div id="gtap-scroll-body" style="min-height:0;max-height:calc(100vh - 360px);overflow:auto;padding-right:4px;">',
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:10px;">',
+      '<label style="display:flex;flex-direction:column;gap:4px;min-width:0;">',
+      '<span style="opacity:.8;">API Key</span>',
+      '<input id="gtap-api-key" type="text" spellcheck="false" style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#eef5ff;padding:8px 10px;">',
+      '</label>',
+      '<button data-action="save-config" style="height:38px;">保存</button>',
+      '</div>',
+      '<div id="gtap-atomic-actions" style="margin-bottom:8px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.04);">',
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">',
+      '<strong>原子功能测试</strong>',
+      '<span style="opacity:.65;font-size:11px;">先验证入口</span>',
+      '</div>',
+      '<div style="display:grid;grid-template-columns:1fr;gap:6px;">',
+      atomicButtonsHtml,
+      '</div>',
+      '</div>',
+      '<div id="gtap-config" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);"></div>',
+      '<div id="gtap-history" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);max-height:180px;overflow:auto;"></div>',
+      '</div>',
+      '<div id="gtap-fixed-log" style="flex:0 0 auto;">',
+      '<div id="gtap-log" title="拖动右下角可调整日志高度" style="white-space:pre-wrap;height:220px;min-height:120px;max-height:520px;resize:vertical;overflow:auto;background:rgba(255,255,255,0.04);border-radius:10px;padding:10px;box-sizing:border-box;"></div>',
+      '</div>',
+      '</div>',
+    ].join('');
   }
 
   function calculateSellOfferPrice(lowestPrice) {
@@ -1285,27 +1372,7 @@
         '</div>',
         '<span id="gtap-status">就绪</span>',
         '</div>',
-        '<div id="gtap-panel-body">',
-        '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:10px;">',
-        '<label style="display:flex;flex-direction:column;gap:4px;min-width:0;">',
-        '<span style="opacity:.8;">API Key</span>',
-        '<input id="gtap-api-key" type="text" spellcheck="false" style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#eef5ff;padding:8px 10px;">',
-        '</label>',
-        '<button data-action="save-config" style="height:38px;">保存</button>',
-        '</div>',
-        '<div id="gtap-atomic-actions" style="margin-bottom:8px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.04);">',
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">',
-        '<strong>原子功能测试</strong>',
-        '<span style="opacity:.65;font-size:11px;">先验证入口</span>',
-        '</div>',
-        '<div style="display:grid;grid-template-columns:1fr;gap:6px;">',
-        atomicButtonsHtml,
-        '</div>',
-        '</div>',
-        '<div id="gtap-config" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);"></div>',
-        '<div id="gtap-history" style="margin-bottom:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);max-height:180px;overflow:auto;"></div>',
-        '<div id="gtap-log" title="拖动右下角可调整日志高度" style="white-space:pre-wrap;height:220px;min-height:120px;max-height:520px;resize:vertical;overflow:auto;background:rgba(255,255,255,0.04);border-radius:10px;padding:10px;box-sizing:border-box;"></div>',
-        '</div>',
+        buildPanelBodyHtml(atomicButtonsHtml),
       ].join('');
 
       panel.addEventListener('click', function (event) {
@@ -1680,6 +1747,44 @@
       });
     }
 
+    function runWishlistReadCurrentBase(snapshot) {
+      return resolveWishlistIdForBase(snapshot && snapshot.base).then(function (wishlistId) {
+        var summary = planWishlistReadCurrentBase(snapshot, wishlistId);
+        pushStep('当前基地', summary.baseName + ' #' + summary.baseId);
+        pushStep('基地 wishlist', summary.wishlistId ? ('#' + summary.wishlistId) : '未解析到 ID');
+        pushStep('补齐天数', String(summary.resupplyDays));
+        return summary;
+      });
+    }
+
+    function runWishlistCheckShipAtExchange(snapshot) {
+      var summary = planWishlistShipAtExchange(snapshot);
+      pushStep('飞船检查', summary.shipName + ' 位于交易所');
+      return Promise.resolve(summary);
+    }
+
+    function runWishlistReadWishlist(snapshot) {
+      return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
+        var summary = planWishlistRowsSummary(rows);
+        pushStep('wishlist 条目', summary.itemCount + ' 种，合计数量 ' + summary.totalAmount);
+        pushStep('wishlist 估算', '总价 ' + summary.estimatedCost);
+        return summary;
+      });
+    }
+
+    function runWishlistReadonlyAtomicAction(action, snapshot) {
+      if (action === 'wishlist_read_current_base') {
+        return runWishlistReadCurrentBase(snapshot);
+      }
+      if (action === 'wishlist_check_ship_at_exchange') {
+        return runWishlistCheckShipAtExchange(snapshot);
+      }
+      if (action === 'wishlist_read_wishlist') {
+        return runWishlistReadWishlist(snapshot);
+      }
+      return Promise.resolve(runAtomicAction(action));
+    }
+
     function handleAtomicAction(action) {
       var result = runAtomicAction(action);
       if (result.action === 'sell_exchange_inventory') {
@@ -1721,6 +1826,32 @@
               label: result.label,
               bought: summary.bought,
               plan: summary.plan,
+            });
+          });
+        }).catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('原子功能失败', state.lastError);
+          finishRun('failed', { action: result.action, label: result.label, error: state.lastError });
+        });
+        return;
+      }
+      if ([
+        'wishlist_read_current_base',
+        'wishlist_check_ship_at_exchange',
+        'wishlist_read_wishlist'
+      ].indexOf(result.action) >= 0) {
+        if (state.running) {
+          pushStep('忙碌', '已有任务在运行');
+          return;
+        }
+        readBaseContext().then(function (snapshot) {
+          startRun('atomic_' + result.action);
+          pushStep('原子功能', result.label);
+          return runWishlistReadonlyAtomicAction(result.action, snapshot).then(function (summary) {
+            finishRun('success', {
+              action: result.action,
+              label: result.label,
+              summary: summary,
             });
           });
         }).catch(function (error) {
@@ -3385,6 +3516,9 @@
       getWishlistResupplyAtomicSteps: getWishlistResupplyAtomicSteps,
       runAtomicAction: runAtomicAction,
       getShipSupportMaterials: getShipSupportMaterials,
+      planWishlistReadCurrentBase: planWishlistReadCurrentBase,
+      planWishlistShipAtExchange: planWishlistShipAtExchange,
+      planWishlistRowsSummary: planWishlistRowsSummary,
       planShipSupportMaterialRestock: planShipSupportMaterialRestock,
       planExchangeInventorySellBatch: planExchangeInventorySellBatch,
       calculateSellOfferPrice: calculateSellOfferPrice,
@@ -3419,6 +3553,9 @@
       _testSellBatchOnExchange: sellBatchOnExchange,
       _testRenderConfig: renderConfig,
       _testBuildAtomicActionsHtml: buildAtomicActionsHtml,
+      _testBuildPanelBodyHtml: function () {
+        return buildPanelBodyHtml(buildAtomicActionsHtml());
+      },
       findPriceForMaterial: findPriceForMaterial,
       getMaterialIconMeta: function (materialId, entry) {
         return getMaterialIconMeta(materialId, defaultMaterialNames(), entry);
