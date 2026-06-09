@@ -8,6 +8,8 @@
 
 **技术栈：** `JavaScript`、`Node.js`、`node --test`、浏览器用户脚本、`localStorage`、游戏页面 DOM。
 
+> 说明：这是一份历史实施计划。当前实现进度与待办请参考 [状态总览](/Users/dango/Documents/yinhe-skill/docs/superpowers/status/2026-06-08-galactic-tycoons-autopilot-status.md)。
+
 ---
 
 ### Task 1: 建立可测试核心接口

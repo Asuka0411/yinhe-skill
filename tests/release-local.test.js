@@ -60,3 +60,7 @@ test('buildOpenChromeUpdateTabAppleScript 使用最后一个标签页作为活�
   assert.match(script, /active tab index.*count of tabs/);
   assert.doesNotMatch(script, /index of newTab/);
 });
+
+test('waitForTampermonkeyUpdatePage 会作为发布等待入口导出', () => {
+  assert.equal(typeof release.waitForTampermonkeyUpdatePage, 'function');
+});

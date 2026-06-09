@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.29
+// @version      0.1.59
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -44,6 +44,10 @@
       { id: 113, enabled: true, name: 'Ship Repair Kit' },
       { id: 149, enabled: true, name: 'Antimatter' },
     ],
+    wishlistTransferBlacklist: [
+      { id: 113, enabled: true, name: 'Ship Repair Kit' },
+      { id: 149, enabled: true, name: 'Antimatter' },
+    ],
   };
 
   var SALE_BUTTON_TEXTS = ['卖出', '出售', 'Sell', 'sell'];
@@ -56,12 +60,13 @@
   var WAREHOUSE_BUTTON_TEXTS = ['Warehouse', '仓库'];
   var EXCHANGE_BUTTON_TEXTS = ['Exchange', '交易所'];
   var VIEW_WISHLIST_BUTTON_TEXTS = ['View Wishlist', '查看愿望单', '查看心愿单'];
-  var CLEAR_BUTTON_TEXTS = ['Clear', '清空', '删除全部'];
+  var EDIT_WISHLIST_BUTTON_TEXTS = ['Edit', '编辑', '编辑愿望单', '修改'];
+  var CLEAR_BUTTON_TEXTS = ['Clear Wishlist', 'Clear', '清空 wishlist', '清空愿望单', '清空心愿单', '清空', '删除全部'];
   var START_FLIGHT_BUTTON_TEXTS = ['Start flight', 'Start Flight', '开始飞行', '起飞'];
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.29';
+  var APP_VERSION = '0.1.59';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -72,16 +77,14 @@
     { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' },
   ];
   var WISHLIST_RESUPPLY_ATOMIC_STEPS = [
-    { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'pending' },
-    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'ready' },
-    { action: 'wishlist_check_ship_at_exchange', label: '检查飞船在交易所', status: 'pending' },
-    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'ready' },
-    { action: 'wishlist_open_exchange', label: '打开交易所', status: 'ready' },
-    { action: 'wishlist_read_wishlist', label: '读取 wishlist', status: 'pending' },
-    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'ready' },
+    { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'done' },
+    { action: 'wishlist_clear_base_wishlist', label: '清空基地 wishlist', status: 'done' },
+    { action: 'wishlist_check_ship_at_exchange', label: '检查飞船在交易所', status: 'done' },
+    { action: 'wishlist_create_resupply_wishlist', label: '创建补给 wishlist', status: 'done' },
+    { action: 'wishlist_buy_wishlist', label: '购买 wishlist', status: 'done' },
     { action: 'wishlist_transfer_to_ship', label: '转移到飞船', status: 'ready' },
-    { action: 'wishlist_fuel_ship', label: '飞船补油', status: 'ready' },
-    { action: 'wishlist_repair_ship', label: '修理飞船', status: 'ready' },
+    { action: 'wishlist_fuel_ship', label: '飞船补油修理', status: 'ready' },
+    { action: 'wishlist_repair_ship', label: '一键补修理包、油', status: 'ready' },
     { action: 'wishlist_send_ship_home', label: '发船回基地', status: 'ready' },
   ];
   var BUY_WISHLIST_WORKFLOW_STEPS = [
@@ -180,7 +183,7 @@
       action: entry.action,
       label: entry.label,
       status: entry.status || 'pending',
-      message: entry.label + (entry.status === 'ready' ? '：可测试' : '：真实流程待接入'),
+      message: entry.label + (entry.status === 'done' ? '：已验证' : (entry.status === 'ready' ? '：可测试' : '：真实流程待接入')),
     };
   }
 
@@ -402,6 +405,27 @@
     };
   }
 
+  function planWishlistAllExchangeShipMaintenance(ships) {
+    var list = Array.isArray(ships) ? ships : [];
+    var normalizedShips = list.map(function (ship) {
+      return {
+        name: normalizeText(ship && (ship.name || ship.shipName || '')),
+        locationText: normalizeText(ship && (ship.locationText || 'Exchange Station')),
+      };
+    }).filter(function (ship) {
+      return !!ship.name;
+    });
+    if (!normalizedShips.length) {
+      throw new Error('未找到交易所飞船');
+    }
+    return {
+      ships: normalizedShips,
+      modes: ['fuel', 'repair'],
+      materials: ['Antimatter', 'Ship Repair Kit'],
+      uiAction: 'all-exchange-ship-maintenance',
+    };
+  }
+
   function buildPanelBodyHtml(atomicButtonsHtml) {
     return [
       '<div id="gtap-panel-body" style="display:flex;flex:1 1 auto;flex-direction:column;gap:10px;min-height:0;overflow:hidden;">',
@@ -494,6 +518,7 @@
     var defaults = {
       outboundWhitelist: deepClone(DEFAULTS.outboundWhitelist),
       sellBlacklist: deepClone(DEFAULTS.sellBlacklist),
+      wishlistTransferBlacklist: deepClone(DEFAULTS.wishlistTransferBlacklist),
       minOutboundAmount: {},
       resupplyDays: DEFAULTS.resupplyDays,
       apiKey: DEFAULTS.wikiApiKey,
@@ -516,6 +541,10 @@
       next.sellBlacklist = normalizeMaterialBlocklist(next.sellBlacklist || defaults.sellBlacklist, defaultMaterialNames());
       if (!next.sellBlacklist.length) {
         next.sellBlacklist = normalizeMaterialBlocklist(defaults.sellBlacklist, defaultMaterialNames());
+      }
+      next.wishlistTransferBlacklist = normalizeMaterialBlocklist(next.wishlistTransferBlacklist || defaults.wishlistTransferBlacklist, defaultMaterialNames());
+      if (!next.wishlistTransferBlacklist.length) {
+        next.wishlistTransferBlacklist = normalizeMaterialBlocklist(defaults.wishlistTransferBlacklist, defaultMaterialNames());
       }
       return next;
     }
@@ -1097,8 +1126,83 @@
     return /(arriv|transit|travel|flight|en route|boosted)/i.test(normalizeText(value));
   }
 
+  function readSelectedExchangeWarehouseShipFromPage(doc) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') {
+      return null;
+    }
+    var labels = Array.prototype.slice.call(doc.querySelectorAll('label[for^="btnradio-whwt"]'));
+    if (!labels.length) {
+      return null;
+    }
+    var inputs = Array.prototype.slice.call(doc.querySelectorAll('input[id^="btnradio-whwt"]'));
+    var checkedInput = null;
+    for (var i = 0; i < inputs.length; i += 1) {
+      if (inputs[i] && inputs[i].checked) {
+        checkedInput = inputs[i];
+        break;
+      }
+    }
+    var selectedLabel = null;
+    if (checkedInput && checkedInput.id) {
+      for (i = 0; i < labels.length; i += 1) {
+        if (labels[i] && labels[i].getAttribute && labels[i].getAttribute('for') === checkedInput.id) {
+          selectedLabel = labels[i];
+          break;
+        }
+      }
+    }
+    selectedLabel = selectedLabel || labels[0];
+    var name = normalizeText(selectedLabel && (selectedLabel.textContent || selectedLabel.innerText));
+    if (!name) {
+      return null;
+    }
+    return {
+      name: name,
+      locationText: 'Exchange Station',
+    };
+  }
+
+  function readExchangeWarehouseShipsFromPage(doc) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') {
+      return [];
+    }
+    var labels = Array.prototype.slice.call(doc.querySelectorAll('label[for^="btnradio-whwt"]'));
+    var seen = new Set();
+    return labels.map(function (label) {
+      var name = normalizeText(label && (label.textContent || label.innerText));
+      if (!name || seen.has(name)) {
+        return null;
+      }
+      seen.add(name);
+      return {
+        name: name,
+        locationText: 'Exchange Station',
+      };
+    }).filter(Boolean);
+  }
+
+  function readExchangeShipsFromPage(doc) {
+    var ships = readShipsFromPage(doc);
+    var exchangeShips = ships.filter(function (ship) {
+      return isExchangeLocationText(ship && ship.locationText);
+    });
+    if (exchangeShips.length) {
+      return exchangeShips;
+    }
+    return readExchangeWarehouseShipsFromPage(doc);
+  }
+
+  function readShipMaintenanceCandidatesFromPage(doc) {
+    var ships = readShipsFromPage(doc);
+    if (ships.length) {
+      return ships;
+    }
+    return readExchangeWarehouseShipsFromPage(doc);
+  }
+
   function inferShipLocationFromPage(doc, base) {
     var ships = readShipsFromPage(doc);
+    var selectedExchangeShip = readSelectedExchangeWarehouseShipFromPage(doc);
     var baseName = normalizeText(base && base.name);
     var hintedShip = findShipByBaseHint(ships, base);
     var baseShip = null;
@@ -1107,6 +1211,9 @@
     var i;
 
     if (!ships.length) {
+      if (selectedExchangeShip) {
+        return { location: 'exchange', ship: selectedExchangeShip };
+      }
       return null;
     }
 
@@ -1335,6 +1442,7 @@
       currentChain: null,
       currentRun: null,
       lastSnapshot: null,
+      lastWishlistPurchaseRows: [],
       lastError: null,
       currentBaseId: null,
       baseStore: null,
@@ -1385,17 +1493,50 @@
     }
 
     function buildWishlistResupplyStepsHtml() {
+      var doneButtonStyle = atomicStatusButtonStyle('done');
+      var defaultBlacklist = normalizeMaterialBlocklist(DEFAULTS.wishlistTransferBlacklist, defaultMaterialNames());
+      var defaultBlacklistRows = defaultBlacklist.map(function (entry) {
+        return [
+          '<div data-wishlist-transfer-blacklist-row="' + entry.id + '" data-icon-id="' + escapeHtml(entry.iconId || '') + '" data-icon-href="' + escapeHtml(entry.iconHref || '') + '" style="display:grid;grid-template-columns:auto 24px minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:6px;">',
+          '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">',
+          '<input class="gtap-wishlist-transfer-blacklist-enabled" data-entry-id="' + entry.id + '" type="checkbox"' + (entry.enabled ? ' checked' : '') + '>',
+          '<span style="opacity:.85;">启用</span>',
+          '</label>',
+          materialIconHtml(entry, materialNames),
+          '<select class="gtap-wishlist-transfer-blacklist-material" data-entry-id="' + entry.id + '" style="min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:5px 6px;">',
+          '<option value="' + entry.id + '" selected>' + escapeHtml(entry.name) + ' (#' + entry.id + ')</option>',
+          '</select>',
+          '<button data-config-action="remove-wishlist-transfer-blacklist-row" data-entry-id="' + entry.id + '" style="padding:5px 7px;">删除</button>',
+          '</div>'
+        ].join('');
+      }).join('');
       return [
+        '<div id="gtap-wishlist-transfer-config">',
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">',
+        '<strong style="font-size:12px;">转移黑名单</strong>',
+        '<button data-config-action="add-wishlist-transfer-blacklist-row" style="padding:5px 7px;">新增</button>',
+        '</div>',
+        '<div data-wishlist-transfer-blacklist-list>',
+        defaultBlacklistRows,
+        '</div>',
+        '<div style="display:grid;grid-template-columns:24px 1fr auto;gap:6px;margin-top:6px;opacity:.7;font-size:11px;">',
+        '<span>图标</span>',
+        '<span>启用后 06 不会点击该物资行的转移按钮。</span>',
+        '<span>操作</span>',
+        '</div>',
+        '<div style="height:1px;background:rgba(255,255,255,0.10);margin:8px 0;"></div>',
+        '</div>',
         '<div data-wishlist-resupply-steps style="display:grid;grid-template-columns:1fr;gap:6px;">',
         '<div style="opacity:.78;line-height:1.45;">补货回运流程拆分测试。当前阶段只验证按钮入口，不执行真实购买、装船或发船。</div>',
         WISHLIST_RESUPPLY_ATOMIC_STEPS.map(function (step, index) {
           var status = step.status || 'pending';
           var statusText = status === 'done' ? '已验证' : (status === 'ready' ? '可测试' : '待接入');
+          var style = status === 'done' ? doneButtonStyle : '';
           var stepNo = String(index + 1).padStart(2, '0');
           return [
             '<div data-wishlist-resupply-step="' + escapeHtml(step.action) + '" style="display:grid;grid-template-columns:34px 1fr 54px;gap:6px;align-items:center;">',
             '<span style="opacity:.62;font-variant-numeric:tabular-nums;">' + escapeHtml(stepNo) + '</span>',
-            '<button data-atomic-action="' + escapeHtml(step.action) + '" data-atomic-status="' + escapeHtml(status) + '" title="' + escapeHtml(statusText) + '">' + escapeHtml(step.label) + '</button>',
+            '<button data-atomic-action="' + escapeHtml(step.action) + '" data-atomic-status="' + escapeHtml(status) + '" title="' + escapeHtml(statusText) + '" style="' + style + '">' + escapeHtml(step.label) + '</button>',
             '<span style="font-size:11px;opacity:.68;text-align:right;">' + escapeHtml(statusText) + '</span>',
             '</div>'
           ].join('');
@@ -1414,11 +1555,16 @@
       return '<div style="opacity:.72;">该功能待接入，暂无配置。</div>';
     }
 
+    function atomicStatusButtonStyle(status) {
+      if (status !== 'done') {
+        return '';
+      }
+      return 'background:linear-gradient(135deg,#14b86f,#0d8f78);border-color:rgba(91,255,190,0.75);color:#ffffff;font-weight:700;box-shadow:0 0 0 1px rgba(91,255,190,0.18),0 8px 18px rgba(20,184,111,0.22);';
+    }
+
     function buildAtomicActionRowHtml(entry) {
       var done = entry.status === 'done';
-      var style = done
-        ? 'background:linear-gradient(135deg,#14b86f,#0d8f78);border-color:rgba(91,255,190,0.75);color:#ffffff;font-weight:700;box-shadow:0 0 0 1px rgba(91,255,190,0.18),0 8px 18px rgba(20,184,111,0.22);'
-        : '';
+      var style = atomicStatusButtonStyle(entry.status);
       var title = done ? '已完成并可用' : '待接入/待验证';
       var expanded = entry.action === 'sell_exchange_inventory';
       return [
@@ -1829,6 +1975,8 @@
     function runRestockShipRepairMaterials(snapshot) {
       var exchangeWarehouse = snapshot && snapshot.exchangeWarehouse;
       var plan = planShipSupportMaterialRestock(exchangeWarehouse);
+      var navigate = testHooks.navigateToExchangePage || navigateToExchangePage;
+      var buyItems = testHooks.buyWishlistItemsFromUi || buyWishlistItemsFromUi;
       pushStep('检查交易所库存', SHIP_SUPPORT_MATERIALS.map(function (material) {
         var current = 0;
         if (exchangeWarehouse && Array.isArray(exchangeWarehouse.mats)) {
@@ -1842,8 +1990,8 @@
         return Promise.resolve({ bought: [], plan: [] });
       }
       pushStep('待购买', plan.map(function (item) { return item.name + ' x ' + item.amount; }).join('，'));
-      return navigateToExchangePage().then(function () {
-        return buyWishlistItemsFromUi(plan);
+      return navigate().then(function () {
+        return buyItems(plan);
       }).then(function (buySummary) {
         pushStep('补修理材料完成', buySummary.length ? ('已购买 ' + buySummary.length + ' 种物资') : '未购买物资');
         return { bought: buySummary, plan: plan };
@@ -1921,10 +2069,7 @@
     function runWishlistCreateResupplyWishlist(snapshot) {
       var base = snapshot && snapshot.base;
       var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.read() : deepClone(DEFAULTS));
-      return openResupplyPage(config.resupplyDays).then(function () {
-        pushStep('页面', '已切到 Resupply');
-        return buildResupplyWishlist(base, config);
-      }).then(function (result) {
+      return buildResupplyWishlist(base, config, snapshot).then(function (result) {
         var rows = result.wishlist || [];
         var days = result.reduceResult ? result.reduceResult.days : config.resupplyDays;
         pushStep('创建补给 wishlist', rows.length + ' 种物资，补齐天数 ' + days);
@@ -1940,7 +2085,10 @@
     }
 
     function runWishlistBuyWishlist(snapshot) {
-      return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
+      var readWishlistRows = testHooks.readWishlistRowsFromApi || readWishlistRowsFromApi;
+      var openWishlist = testHooks.openBaseWishlistFromResupply || openBaseWishlistFromResupply;
+      var buyWishlistItems = testHooks.buyWishlistItemsFromWishlistPage || buyWishlistItemsFromWishlistPage;
+      return readWishlistRows(snapshot && snapshot.base).then(function (rows) {
         var summary = planWishlistRowsSummary(rows);
         var affordable = assertWishlistPurchaseAffordable({
           company: snapshot && snapshot.company,
@@ -1950,9 +2098,10 @@
         if (summary.estimatedCost > 0) {
           pushStep('资金检查', '可用 ' + affordable.availableCash + '，预计 ' + affordable.estimatedCost);
         }
-        return navigateToExchangePage().then(function () {
-          return buyWishlistItemsFromUi(summary.rows);
+        return openWishlist(snapshot && snapshot.base).then(function () {
+          return buyWishlistItems(summary.rows);
         }).then(function (buySummary) {
+          state.lastWishlistPurchaseRows = deepClone(summary.rows);
           pushStep('购买 wishlist', buySummary.length ? ('已购买 ' + buySummary.length + ' 种物资') : '未购买物资');
           return {
             wishlist: summary,
@@ -1963,13 +2112,21 @@
     }
 
     function runWishlistTransferToShip(snapshot) {
-      return readWishlistRowsFromApi(snapshot && snapshot.base).then(function (rows) {
+      var readWishlistRows = testHooks.readWishlistRowsFromApi || readWishlistRowsFromApi;
+      var loadShip = testHooks.loadBatchOntoShip || loadBatchOntoShip;
+      var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.read() : deepClone(DEFAULTS));
+      var cachedRows = state.lastWishlistPurchaseRows && state.lastWishlistPurchaseRows.length
+        ? deepClone(state.lastWishlistPurchaseRows)
+        : null;
+      var rowsPromise = cachedRows ? Promise.resolve(cachedRows) : readWishlistRows(snapshot && snapshot.base);
+      return rowsPromise.then(function (rows) {
         var plan = planWishlistTransferBatch(snapshot, rows);
         pushStep('转移到飞船', plan.ship.name + '，' + plan.batch.length + ' 种物资');
-        return loadBatchOntoShip(plan.batch, plan.ship).then(function (transferSummary) {
+        return loadShip(plan.batch, plan.ship, config.wishlistTransferBlacklist || DEFAULTS.wishlistTransferBlacklist).then(function (transferSummary) {
           pushStep('转移完成', transferSummary.length ? transferSummary.map(function (item) {
             return item.name + ' x ' + item.amount;
           }).join('，') : '未转移物资');
+          state.lastWishlistPurchaseRows = [];
           return {
             ship: plan.ship,
             transferSummary: transferSummary,
@@ -1992,14 +2149,57 @@
     }
 
     function runWishlistShipMaintenance(snapshot, mode) {
-      var plan = planWishlistShipMaintenance(snapshot, mode);
-      pushStep(plan.mode === 'fuel' ? '飞船补油' : '修理飞船', plan.ship.name + '，需要使用 ' + plan.materialName);
-      if (!openShipInfoModalInDocument(doc, plan.ship)) {
-        throw new Error('未找到飞船信息入口：' + normalizeText(plan.ship.name || plan.ship.shipName || '未命名飞船'));
+      var normalizedMode = normalizeText(mode);
+      if (normalizedMode && normalizedMode !== 'fuel_and_repair') {
+        var singlePlan = planWishlistShipMaintenance(snapshot, normalizedMode);
+        pushStep(singlePlan.mode === 'fuel' ? '飞船补油' : '修理飞船', singlePlan.ship.name + '，需要使用 ' + singlePlan.materialName);
+        if (!openShipInfoModalInDocument(doc, singlePlan.ship)) {
+          throw new Error('未找到飞船信息入口：' + normalizeText(singlePlan.ship.name || singlePlan.ship.shipName || '未命名飞船'));
+        }
+        var singleResult = performShipMaintenanceInDocument(doc, singlePlan.mode);
+        pushStep(singlePlan.mode === 'fuel' ? '补油完成' : '修理完成', singlePlan.materialName + ' x ' + singleResult.amount);
+        return Promise.resolve(Object.assign({}, singlePlan, singleResult));
       }
-      var result = performShipMaintenanceInDocument(doc, plan.mode);
-      pushStep(plan.mode === 'fuel' ? '补油完成' : '修理完成', plan.materialName + ' x ' + result.amount);
-      return Promise.resolve(Object.assign({}, plan, result));
+      var plan = planWishlistAllExchangeShipMaintenance(readShipMaintenanceCandidatesFromPage(doc));
+      var results = [];
+      var skipped = [];
+      pushStep('飞船补油修理', '候选飞船 ' + plan.ships.length + ' 艘');
+      return plan.ships.reduce(function (shipPromise, ship) {
+        return shipPromise.then(function () {
+          if (!openShipInfoModalInDocument(doc, ship)) {
+            throw new Error('未找到飞船信息入口：' + normalizeText(ship.name || ship.shipName || '未命名飞船'));
+          }
+          return wait(300).then(function () {
+            var currentLocationText = inferOpenShipLocationText(doc, ship);
+            if (!isExchangeLocationText(currentLocationText)) {
+              skipped.push({
+                ship: ship,
+                locationText: currentLocationText,
+                reason: 'not_at_exchange',
+              });
+              pushStep('跳过飞船维护', ship.name + '，当前位置=' + currentLocationText);
+              return null;
+            }
+            var maintenance = [];
+            return plan.modes.reduce(function (modePromise, shipMode) {
+              return modePromise.then(function () {
+                return performShipMaintenanceInDocumentAsync(doc, shipMode).then(function (result) {
+                  maintenance.push(result);
+                  pushStep(shipMode === 'fuel' ? '补油完成' : '修理完成', ship.name + '，' + (shipMode === 'fuel' ? 'Antimatter' : 'Ship Repair Kit') + ' x ' + result.amount);
+                  return wait(200);
+                });
+              });
+            }, Promise.resolve()).then(function () {
+              results.push({
+                ship: ship,
+                maintenance: maintenance,
+              });
+            });
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        return Object.assign({}, plan, { results: results, skipped: skipped });
+      });
     }
 
     function runWishlistAtomicAction(action, snapshot) {
@@ -2028,10 +2228,10 @@
         return runWishlistTransferToShip(snapshot);
       }
       if (action === 'wishlist_fuel_ship') {
-        return runWishlistShipMaintenance(snapshot, 'fuel');
+        return runWishlistShipMaintenance(snapshot, 'fuel_and_repair');
       }
       if (action === 'wishlist_repair_ship') {
-        return runWishlistShipMaintenance(snapshot, 'repair');
+        return runRestockShipRepairMaterials(snapshot);
       }
       if (action === 'wishlist_send_ship_home') {
         return runWishlistSendShipHome(snapshot);
@@ -2382,16 +2582,14 @@
       });
     }
 
-    function buildResupplyWishlist(base, config) {
+    function buildResupplyWishlist(base, config, snapshot) {
       if (doc) {
-        return buildResupplyWishlistFromUi(base, config).catch(function () {
-          return buildResupplyWishlistFromEstimate(base, config);
-        });
+        return buildResupplyWishlistFromUi(base, config, snapshot);
       }
-      return buildResupplyWishlistFromEstimate(base, config);
+      return buildResupplyWishlistFromEstimate(base, config, snapshot);
     }
 
-    function buildResupplyWishlistFromEstimate(base, config) {
+    function buildResupplyWishlistFromEstimate(base, config, snapshot) {
       var targetDays = Number(config.resupplyDays || DEFAULTS.resupplyDays);
       var estimate = function (days) {
         var totalWeight = 0;
@@ -2421,8 +2619,8 @@
           return { weight: result.weight, price: result.price };
         },
         limits: {
-          maxWeight: snapshotShipCapacity(base) * 0.95,
-          maxPrice: snapshotCredits(),
+          maxWeight: snapshotShipCapacity(snapshot) * 0.95,
+          maxPrice: snapshotCredits(snapshot),
         },
       });
 
@@ -2432,92 +2630,30 @@
       });
     }
 
-    function buildResupplyWishlistFromUi(base, config) {
+    function buildResupplyWishlistFromUi(base, config, snapshot) {
       var targetDays = Number(config.resupplyDays || DEFAULTS.resupplyDays);
-      return rebuildWishlistAtDays(base, targetDays).then(function (firstPass) {
-        var reduceResult = reduceResupplyDays({
-          targetDays: targetDays,
-          maxDays: targetDays,
-          minDays: 1,
-          estimate: function (days) {
-            if (days === targetDays) {
-              return { weight: firstPass.weight, price: firstPass.price };
-            }
-            return estimateResupplyTotalsByScale(firstPass.rows, days, targetDays);
-          },
-          limits: {
-            maxWeight: snapshotShipCapacity() * 0.95,
-            maxPrice: snapshotCredits(),
-          },
-        });
-
-        if (reduceResult.days === targetDays) {
-          return {
-            reduceResult: {
-              days: targetDays,
-              weight: firstPass.weight,
-              price: firstPass.price,
-              limited: false,
-            },
-            wishlist: firstPass.rows,
-          };
+      var capacity = snapshotShipCapacity(snapshot);
+      return ensureBaseResupplyPage(base, targetDays).then(function () {
+        return selectAllResupplyRows();
+      }).then(function () {
+        return wait(300);
+      }).then(function () {
+        return findResupplyDaysForCapacity(targetDays, capacity);
+      }).then(function (reduceResult) {
+        if (reduceResult && reduceResult.exhausted) {
+          var capacityError = new Error('补给 wishlist 重量 ' + reduceResult.weight + ' 超过飞船容量 ' + capacity);
+          throw capacityError;
         }
-
-        return rebuildWishlistAtDays(base, reduceResult.days).then(function (nextPass) {
-          return {
-            reduceResult: {
-              days: reduceResult.days,
-              weight: nextPass.weight,
-              price: nextPass.price,
-              limited: true,
-            },
-            wishlist: nextPass.rows,
-          };
+        return clickAddToWishlistOnUi().then(function () {
+          return wait(500).then(function () {
+            return readWishlistRowsFromApi(base).then(function (rows) {
+              return {
+                reduceResult: reduceResult,
+                wishlist: rows,
+              };
+            });
+          });
         });
-      });
-    }
-
-    function estimateResupplyTotalsByScale(rows, days, baseDays) {
-      var weight = 0;
-      var price = 0;
-      var divisor = Math.max(1, baseDays || 1);
-      (rows || []).forEach(function (row) {
-        var ratio = Math.min(1, days / divisor);
-        weight += Number(row.weight || 0) * ratio;
-        price += Number(row.cost || 0) * ratio;
-      });
-      return { weight: weight, price: price };
-    }
-
-    function rebuildWishlistAtDays(base, days) {
-      pushStep('补货天数', String(days));
-      applyResupplyDays(days);
-      return wait(500)
-        .then(clearWishlistFromUi)
-        .then(function () {
-          return wait(300);
-        })
-        .then(selectAllResupplyRows)
-        .then(function () {
-          return wait(300);
-        })
-        .then(clickAddToWishlistOnUi)
-        .then(function () {
-          return wait(500);
-        })
-        .then(function () {
-          return readResupplyRows(base);
-        });
-    }
-
-    function readResupplyRows(base) {
-      var totals = readResupplyTotalsFromPage();
-      return readWishlistRowsFromApi(base).then(function (rows) {
-        return {
-          weight: totals.weight,
-          price: totals.price,
-          rows: rows,
-        };
       });
     }
 
@@ -2577,12 +2713,145 @@
       };
     }
 
+    function isOnBasePage() {
+      var pathname = String(win && win.location && win.location.pathname || '');
+      if (/\/base/i.test(pathname)) {
+        return true;
+      }
+      return !!findUniqueButtonByTexts(doc, RESUPPLY_BUTTON_TEXTS);
+    }
+
+    function ensureSelectedBase(base) {
+      if (!base || !base.id) {
+        return Promise.resolve(false);
+      }
+      var currentBaseId = getCurrentBaseId();
+      if (currentBaseId && Number(currentBaseId) === Number(base.id)) {
+        return Promise.resolve(true);
+      }
+      var baseItem = findBaseListButtonByName(base.name || ('Base ' + base.id));
+      if (!baseItem) {
+        return Promise.resolve(false);
+      }
+      clickElement(baseItem);
+      return wait(700).then(function () { return true; });
+    }
+
+    function ensureBaseResupplyPage(base, days) {
+      if (!doc) {
+        return Promise.resolve(false);
+      }
+      var sequence = Promise.resolve();
+      if (!isOnBasePage()) {
+        sequence = sequence.then(function () {
+          var baseButton = findUniqueButtonByTexts(doc, BASE_BUTTON_TEXTS);
+          if (baseButton) {
+            clickElement(baseButton);
+          }
+          return wait(700);
+        });
+      }
+      return sequence
+        .then(function () {
+          return ensureSelectedBase(base);
+        })
+        .then(function () {
+          if (findUniqueButtonByTexts(doc, VIEW_WISHLIST_BUTTON_TEXTS) || findUniqueButtonByTexts(doc, WISHLIST_BUTTON_TEXTS)) {
+            return wait(100);
+          }
+          var resupplyButton = findUniqueButtonByTexts(doc, RESUPPLY_BUTTON_TEXTS);
+          if (!resupplyButton) {
+            throw new Error('未找到 Resupply 按钮');
+          }
+          clickElement(resupplyButton);
+          return wait(700);
+        })
+        .then(function () {
+          if (days != null) {
+            applyResupplyDays(days);
+          }
+          return wait(300);
+        });
+    }
+
+    function normalizeResupplyDaysHalfStep(days) {
+      var value = Number(days || 0);
+      if (!Number.isFinite(value) || value <= 0) {
+        value = 0.5;
+      }
+      return Math.max(0.5, Math.floor(value * 2) / 2);
+    }
+
+    function findResupplyDaysForCapacity(targetDays, capacity) {
+      var days = normalizeResupplyDaysHalfStep(targetDays);
+      var maxWeight = Number(capacity || 0);
+      var totals;
+
+      if (!maxWeight || !Number.isFinite(maxWeight)) {
+        totals = readResupplyTotalsFromPage();
+        return Promise.resolve({
+          days: days,
+          weight: totals.weight,
+          price: totals.price,
+          limited: false,
+        });
+      }
+
+      totals = readResupplyTotalsFromPage();
+      if (totals.weight <= maxWeight) {
+        return Promise.resolve({
+          days: days,
+          weight: totals.weight,
+          price: totals.price,
+          limited: false,
+        });
+      }
+      days = normalizeResupplyDaysHalfStep(days * maxWeight / Math.max(1, totals.weight));
+      return adjustResupplyDaysUntilWithinCapacity(days, maxWeight, true);
+    }
+
+    function adjustResupplyDaysUntilWithinCapacity(days, maxWeight, limited) {
+      days = normalizeResupplyDaysHalfStep(days);
+      applyResupplyDays(days);
+      return wait(300).then(function () {
+        return selectAllResupplyRows();
+      }).then(function () {
+        return wait(300);
+      }).then(function () {
+        var adjusted = readResupplyTotalsFromPage();
+        if (adjusted.weight <= maxWeight || days <= 0.5) {
+          return {
+            days: days,
+            weight: adjusted.weight,
+            price: adjusted.price,
+            limited: !!limited,
+            exhausted: adjusted.weight > maxWeight,
+          };
+        }
+        return adjustResupplyDaysUntilWithinCapacity(days - 0.5, maxWeight, true);
+      });
+    }
+
     function clearWishlistFromUi() {
       var viewButton = findUniqueButtonByTexts(doc, VIEW_WISHLIST_BUTTON_TEXTS);
+      if (!viewButton) {
+        return Promise.resolve(false);
+      }
+      var viewText = normalizeText(viewButton && (viewButton.textContent || viewButton.innerText || ''));
+      var viewCountMatch = viewText.match(/\((\d+)\)/);
+      if (viewCountMatch && Number(viewCountMatch[1]) <= 0) {
+        return Promise.resolve(true);
+      }
       if (viewButton) {
         clickElement(viewButton);
       }
       return wait(400).then(function () {
+        var editButton = findUniqueButtonByTexts(doc, EDIT_WISHLIST_BUTTON_TEXTS) || findButtonByIconHref(doc, 'pencil');
+        if (editButton) {
+          clickElement(editButton);
+        }
+        return wait(300);
+      }).then(function () {
         var clearButton = findUniqueButtonByTexts(doc, CLEAR_BUTTON_TEXTS);
         if (clearButton) {
           clickElement(clearButton);
@@ -2591,7 +2860,198 @@
         if (confirmButton) {
           clickElement(confirmButton);
         }
+        var baseButton = findUniqueButtonByTexts(doc, BASE_BUTTON_TEXTS);
+        if (baseButton) {
+          clickElement(baseButton);
+        }
         return true;
+      });
+    }
+
+    function parseButtonCount(button) {
+      var text = normalizeText(button && (button.textContent || button.innerText || ''));
+      var match = text.match(/\((\d+)\)/);
+      return match ? Number(match[1]) : null;
+    }
+
+    function openBaseWishlistFromResupply(base) {
+      return ensureBaseResupplyPage(base).then(function () {
+        var viewButton = findUniqueButtonByTexts(doc, VIEW_WISHLIST_BUTTON_TEXTS);
+        if (!viewButton) {
+          throw new Error('未找到 View Wishlist 按钮');
+        }
+        var count = parseButtonCount(viewButton);
+        if (count != null && count <= 0) {
+          throw new Error('当前基地 wishlist 为空');
+        }
+        clickElement(viewButton);
+        return wait(700);
+      }).then(function () {
+        if (!isOnWishlistExchangePage()) {
+          throw new Error('点击 View Wishlist 后未进入交易所 wishlist 页面');
+        }
+        return true;
+      });
+    }
+
+    function isOnWishlistExchangePage() {
+      var pathname = String(win && win.location && win.location.pathname || '');
+      if (!/\/exchange/i.test(pathname)) {
+        return !!findAnyWishlistMaterialRow([]);
+      }
+      var url = String(win && win.location && win.location.href || '');
+      return /wishlist/i.test(url) || !!findAnyWishlistMaterialRow([]);
+    }
+
+    function findAnyWishlistMaterialRow(rows) {
+      var list = rows && rows.length ? rows : Array.prototype.slice.call(doc && doc.querySelectorAll
+        ? doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item')
+        : []);
+      return list.some(function (row) {
+        return row && row.getClientRects && row.getClientRects().length && rowLooksLikeWishlistEntry(row);
+      });
+    }
+
+    function rowLooksLikeWishlistEntry(row) {
+      if (!row) {
+        return false;
+      }
+      var text = normalizeText(row.textContent || row.innerText || '');
+      if (!text) {
+        return false;
+      }
+      var role = row.getAttribute && normalizeText(row.getAttribute('role'));
+      var className = String(row.className || '');
+      var hasQuantityInput = row.querySelectorAll && Array.prototype.slice.call(row.querySelectorAll('input[type="number"], input')).some(function (input) {
+        return input && (!input.getClientRects || input.getClientRects().length);
+      });
+      return role === 'button' || /cursor-pointer|clickable|list-group-item/.test(className) || hasQuantityInput;
+    }
+
+    function findWishlistMaterialRow(materialName) {
+      if (!doc || !materialName) {
+        return null;
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      for (var i = 0; i < rows.length; i += 1) {
+        var rowText = normalizeText(rows[i].textContent || rows[i].innerText || '');
+        if (!exchangeRowMatchesMaterial(rowText, materialName)) {
+          continue;
+        }
+        if (!rowLooksLikeWishlistEntry(rows[i])) {
+          continue;
+        }
+        return rows[i];
+      }
+      return null;
+    }
+
+    function findTradeQuantityInput() {
+      if (!doc) {
+        return null;
+      }
+      var direct = doc.getElementById ? doc.getElementById('inputQuantity') : null;
+      if (direct && (!direct.getClientRects || direct.getClientRects().length)) {
+        return direct;
+      }
+      var inputs = visibleFormInputs(doc);
+      for (var i = 0; i < inputs.length; i += 1) {
+        if (textIncludesAny(inputTextHints(inputs[i]), ['quantity', 'amount', '数量'])) {
+          return inputs[i];
+        }
+      }
+      return inputs.length ? inputs[0] : null;
+    }
+
+    function ensureTradeQuantity(expectedAmount, materialName) {
+      var input = findTradeQuantityInput();
+      if (!input) {
+        throw new Error('未找到购买数量输入框：' + materialName);
+      }
+      var actual = parseNumber(input.value, 0);
+      if (actual !== Number(expectedAmount)) {
+        setInputValue(input, String(expectedAmount));
+      }
+      actual = parseNumber(input.value, 0);
+      if (actual !== Number(expectedAmount)) {
+        throw new Error('购买数量不匹配：' + materialName + '，需要 ' + expectedAmount + '，当前 ' + actual);
+      }
+      return true;
+    }
+
+    function readCurrentBuyPanelMaterialName() {
+      if (!doc || !doc.querySelectorAll) {
+        return '';
+      }
+      var tradeCard = doc.getElementById ? doc.getElementById('exchangeTradeMatCard') : null;
+      var scope = tradeCard || doc;
+      var nodes = Array.prototype.slice.call(scope.querySelectorAll('h1,h2,h3,h4,h5,.card-header,.card-title,.text-uppercase,.fw-bold'));
+      for (var i = 0; i < nodes.length; i += 1) {
+        if (nodes[i].closest && nodes[i].closest('#gtap-panel')) {
+          continue;
+        }
+        if (nodes[i].getClientRects && !nodes[i].getClientRects().length) {
+          continue;
+        }
+        var text = normalizeText(nodes[i].textContent || nodes[i].innerText || '');
+        if (!text || textIncludesAny(text, ['Wishlist', 'Materials', 'Exchange Warehouse', 'My Offers', 'Contracts'])) {
+          continue;
+        }
+        return normalizeText(text.replace(/\bBuy\b/ig, '').replace(/\bSell\b/ig, ''));
+      }
+      return '';
+    }
+
+    function ensureBuyPanelMatchesWishlistItem(item) {
+      ensureTradeQuantity(item.amount, item.name);
+      var panelName = readCurrentBuyPanelMaterialName();
+      if (panelName && !exchangeRowMatchesMaterial(panelName, item.name)) {
+        throw new Error('购买面板物资不匹配：需要 ' + item.name + '，当前 ' + panelName);
+      }
+      pushStep('购买核对', item.name + ' x ' + item.amount);
+      return true;
+    }
+
+    function waitForWishlistRowRemoved(materialName, attempts) {
+      var remainingAttempts = attempts == null ? 8 : attempts;
+      if (!findWishlistMaterialRow(materialName)) {
+        return Promise.resolve(true);
+      }
+      if (remainingAttempts <= 0) {
+        return Promise.reject(new Error('购买后 wishlist 仍存在：' + materialName));
+      }
+      return wait(350).then(function () {
+        return waitForWishlistRowRemoved(materialName, remainingAttempts - 1);
+      });
+    }
+
+    function buyWishlistItemsFromWishlistPage(wishlist) {
+      var summary = [];
+      return (wishlist || []).reduce(function (promise, item) {
+        return promise.then(function () {
+          if (!item || !item.name || !item.amount) {
+            return;
+          }
+          pushStep('购买物资', item.name + ' x ' + item.amount);
+          var row = findWishlistMaterialRow(item.name);
+          if (!row) {
+            throw new Error('未找到 wishlist 物资行：' + item.name);
+          }
+          clickElement(row);
+          return wait(300).then(function () {
+            ensureBuyPanelMatchesWishlistItem(item);
+            return wait(200);
+          }).then(function () {
+            if (!clickFinalBuyButtonInDocument(doc)) {
+              throw new Error('未找到最终购买按钮：' + item.name);
+            }
+            return waitForWishlistRowRemoved(item.name);
+          }).then(function () {
+            summary.push({ name: item.name, amount: item.amount });
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        return summary;
       });
     }
 
@@ -2617,16 +3077,27 @@
       return Promise.resolve(true);
     }
 
-    function snapshotShipCapacity(base) {
-      var company = state.lastSnapshot && state.lastSnapshot.company;
-      var shipInfo = state.lastSnapshot && state.lastSnapshot.shipInfo;
+    function snapshotShipCapacity(snapshot) {
+      snapshot = snapshot || state.lastSnapshot || {};
+      var shipInfo = snapshot.shipInfo;
       var ship = shipInfo && shipInfo.ship;
-      var capacity = ship && (ship.capacity || ship.cargo || ship.maxCargo || ship.maxCapacity || 0);
+      var nameCapacity = parseShipCapacityFromName(ship && (ship.name || ship.shipName));
+      var capacity = nameCapacity || (ship && (ship.capacity || ship.cargo || ship.maxCargo || ship.maxCapacity || 0));
       return Number(capacity || 0) || 1000;
     }
 
-    function snapshotCredits() {
-      var company = state.lastSnapshot && state.lastSnapshot.company;
+    function parseShipCapacityFromName(name) {
+      var text = normalizeText(name || '');
+      var match = text.match(/^([0-9][0-9,\s.]*)/);
+      if (!match) {
+        return 0;
+      }
+      return parseNumber(match[1], 0);
+    }
+
+    function snapshotCredits(snapshot) {
+      snapshot = snapshot || state.lastSnapshot || {};
+      var company = snapshot.company;
       return Number((company && (company.credits || company.money || company.cash)) || 0) || 1000000000;
     }
 
@@ -2642,8 +3113,7 @@
         clickElement(button);
         return wait(1200).then(function () { return true; });
       }
-      win.location.href = 'https://g2.galactictycoons.com/exchange';
-      return wait(1600).then(function () { return true; });
+      return Promise.reject(new Error('未找到 Exchange 按钮'));
     }
 
     function findBaseListButtonByName(baseName) {
@@ -2675,12 +3145,60 @@
       return null;
     }
 
+    function readSelectedShipTabName(prefixes) {
+      if (!doc || !prefixes || !prefixes.length || typeof doc.querySelectorAll !== 'function') {
+        return '';
+      }
+      var labelSelector = prefixes.map(function (prefix) {
+        return 'label[for^="' + prefix + '"]';
+      }).join(', ');
+      var labels = Array.prototype.slice.call(doc.querySelectorAll(labelSelector));
+      var inputSelector = prefixes.map(function (prefix) {
+        return 'input[id^="' + prefix + '"]';
+      }).join(', ');
+      var inputs = Array.prototype.slice.call(doc.querySelectorAll(inputSelector));
+      for (var inputIndex = 0; inputIndex < inputs.length; inputIndex += 1) {
+        if (!inputs[inputIndex] || !inputs[inputIndex].checked) {
+          continue;
+        }
+        var checkedId = normalizeText(inputs[inputIndex].id || (inputs[inputIndex].getAttribute && inputs[inputIndex].getAttribute('id')) || '');
+        for (var labelIndex = 0; labelIndex < labels.length; labelIndex += 1) {
+          if (normalizeText(labels[labelIndex].getAttribute && labels[labelIndex].getAttribute('for')) === checkedId) {
+            return normalizeText(labels[labelIndex].textContent || labels[labelIndex].innerText || '');
+          }
+        }
+      }
+      for (var i = 0; i < labels.length; i += 1) {
+        var className = String(labels[i].className || '');
+        var ariaSelected = normalizeText(labels[i].getAttribute && (labels[i].getAttribute('aria-selected') || labels[i].getAttribute('aria-pressed')));
+        if (/\b(active|checked|selected)\b/i.test(className) || ariaSelected === 'true') {
+          return normalizeText(labels[i].textContent || labels[i].innerText || '');
+        }
+      }
+      return '';
+    }
+
     function selectShipWarehouseTab(ship) {
       var label = findShipTabLabel(ship && ship.name, ['btnradio-whwt']);
       if (!label) {
         return false;
       }
       clickElement(label);
+      return true;
+    }
+
+    function assertSelectedShipWarehouseTab(ship) {
+      var expected = normalizeText(ship && ship.name);
+      var actual = readSelectedShipTabName(['btnradio-whwt']);
+      if (!expected) {
+        throw new Error('未指定目标飞船');
+      }
+      if (!actual) {
+        throw new Error('无法确认当前选中飞船：目标=' + expected);
+      }
+      if (actual !== expected) {
+        throw new Error('当前选中飞船不是目标飞船：当前=' + actual + '，目标=' + expected);
+      }
       return true;
     }
 
@@ -2860,7 +3378,7 @@
       if (!doc || !materialName) {
         return null;
       }
-      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"]'));
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
       for (var i = 0; i < rows.length; i += 1) {
         var rowText = normalizeText(rows[i].textContent || '');
         if (!matchesWarehouseRowMaterial(rowText, materialName)) {
@@ -2876,7 +3394,110 @@
       return null;
     }
 
-    function loadBatchOntoShip(batch, ship) {
+    function nodeHasVisibleRect(node) {
+      return !!(node && (!node.getClientRects || node.getClientRects().length));
+    }
+
+    function closestTransferContextText(button) {
+      var texts = [];
+      var node = button;
+      var depth = 0;
+      while (node && depth < 5) {
+        texts.push(normalizeText(node.textContent || node.innerText || ''));
+        node = node.parentElement;
+        depth += 1;
+      }
+      return texts.join(' ');
+    }
+
+    function buttonIsInsideWarehouseMaterialRow(button) {
+      if (!button || typeof button.closest !== 'function') {
+        return false;
+      }
+      return !!button.closest('tr,[role="row"],.mat-row,.mat-item');
+    }
+
+    function buttonLooksLikeTransferAll(button) {
+      var html = String(button && button.innerHTML || '');
+      if (html.indexOf('#arrow-right') < 0 && html.indexOf('arrow-right') < 0) {
+        return false;
+      }
+      if (buttonIsInsideWarehouseMaterialRow(button)) {
+        return false;
+      }
+      var contextText = closestTransferContextText(button);
+      return /\/\s*[\d,.]+\s*t/i.test(contextText) || textIncludesAny(contextText, ['Exchange Warehouse']);
+    }
+
+    function findExchangeWarehouseTransferAllButtonInDocument(docRef) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return null;
+      }
+      var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button'));
+      for (var i = 0; i < buttons.length; i += 1) {
+        if (nodeHasVisibleRect(buttons[i]) && buttonLooksLikeTransferAll(buttons[i])) {
+          return buttons[i];
+        }
+      }
+      return null;
+    }
+
+    function enabledTransferBlacklistIds(blacklist) {
+      return new Set(normalizeMaterialBlocklist(blacklist || DEFAULTS.wishlistTransferBlacklist, materialNames)
+        .filter(function (entry) { return entry.enabled; })
+        .map(function (entry) { return Number(entry.id); }));
+    }
+
+    function findShipWarehouseReturnButton(materialName) {
+      if (!doc || !materialName) {
+        return null;
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      for (var i = 0; i < rows.length; i += 1) {
+        var rowText = normalizeText(rows[i].textContent || '');
+        if (!matchesWarehouseRowMaterial(rowText, materialName) && !exchangeRowMatchesMaterial(rowText, materialName)) {
+          continue;
+        }
+        var buttons = Array.prototype.slice.call(rows[i].querySelectorAll ? rows[i].querySelectorAll('button') : []);
+        for (var j = 0; j < buttons.length; j += 1) {
+          var html = String(buttons[j].innerHTML || '');
+          if (html.indexOf('#arrow-left') >= 0 || html.indexOf('arrow-left') >= 0) {
+            return buttons[j];
+          }
+        }
+      }
+      return null;
+    }
+
+    function returnBlacklistedTransferItemsToExchange(batch, blacklist) {
+      var blocked = enabledTransferBlacklistIds(blacklist);
+      var blacklisted = (batch || []).filter(function (item) {
+        return item && blocked.has(Number(item.id));
+      });
+      return blacklisted.reduce(function (promise, item) {
+        return promise.then(function () {
+          var button = findShipWarehouseReturnButton(item.name);
+          if (!button) {
+            throw new Error('未找到黑名单物资移回按钮：' + item.name);
+          }
+          clickElement(button);
+          return wait(250);
+        });
+      }, Promise.resolve()).then(function () {
+        return blocked;
+      });
+    }
+
+    function confirmWarehouseTransfer(materialName) {
+      var confirmButton = findButtonByIconHref(doc, '#check');
+      if (!confirmButton) {
+        throw new Error('未找到装货确认按钮：' + materialName);
+      }
+      clickElement(confirmButton);
+      return wait(450);
+    }
+
+    function transferExchangeWarehouseToShip(batch, ship, transferBlacklist) {
       if (!doc || !ship) {
         return Promise.resolve([]);
       }
@@ -2884,12 +3505,51 @@
         throw new Error('未找到货舱飞船标签：' + normalizeText(ship.name || ''));
       }
       return wait(300).then(function () {
+        assertSelectedShipWarehouseTab(ship);
+        var blocked = enabledTransferBlacklistIds(transferBlacklist);
+        var summary = [];
+        return (batch || []).reduce(function (promise, item) {
+          return promise.then(function () {
+            if (!item || !item.name || !item.current || blocked.has(Number(item.id))) {
+              return;
+            }
+            assertSelectedShipWarehouseTab(ship);
+            var button = findWarehouseTransferButton(item.name);
+            if (!button) {
+              throw new Error('未找到装货按钮：' + item.name);
+            }
+            clickElement(button);
+            summary.push({ name: item.name, amount: item.current });
+            return wait(250).then(function () {
+              return confirmWarehouseTransfer(item.name);
+            });
+          });
+        }, Promise.resolve()).then(function () {
+          return summary;
+        });
+      });
+    }
+
+    function loadBatchOntoShip(batch, ship, transferBlacklist) {
+      return transferExchangeWarehouseToShip(batch, ship, transferBlacklist);
+    }
+
+    function loadBatchOntoShipByRows(batch, ship) {
+      if (!doc || !ship) {
+        return Promise.resolve([]);
+      }
+      if (!selectShipWarehouseTab(ship)) {
+        throw new Error('未找到货舱飞船标签：' + normalizeText(ship.name || ''));
+      }
+      return wait(300).then(function () {
+        assertSelectedShipWarehouseTab(ship);
         var summary = [];
         return (batch || []).reduce(function (promise, item) {
           return promise.then(function () {
             if (!item || !item.name || !item.current) {
               return;
             }
+            assertSelectedShipWarehouseTab(ship);
             var button = findWarehouseTransferButton(item.name);
             if (!button) {
               throw new Error('未找到装货按钮：' + item.name);
@@ -3077,16 +3737,149 @@
       return popovers.length ? popovers[popovers.length - 1] : null;
     }
 
+    function isShipMaintenancePopover(popup, plan) {
+      if (!popup || typeof popup.querySelectorAll !== 'function' || !visibleFormInputs(popup).length) {
+        return false;
+      }
+      var text = normalizeText(popup.textContent || popup.innerText || '');
+      if (plan && plan.mode === 'fuel') {
+        return /Refuel|Tank|Antimatter/i.test(text);
+      }
+      if (plan && plan.mode === 'repair') {
+        return /Repair|Condition|Kit/i.test(text);
+      }
+      return true;
+    }
+
+    function findLatestShipMaintenancePopoverInDocument(docRef, plan) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return null;
+      }
+      var popovers = Array.prototype.slice.call(docRef.querySelectorAll('.popover'));
+      for (var i = popovers.length - 1; i >= 0; i -= 1) {
+        if (isShipMaintenancePopover(popovers[i], plan)) {
+          return popovers[i];
+        }
+      }
+      return null;
+    }
+
+    function findShipMaintenanceEntryButton(docRef, plan) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return null;
+      }
+      var popupButtons = Array.prototype.slice.call(docRef.querySelectorAll('button[data-popup-id="' + plan.popupId + '"]'));
+      if (popupButtons.length === 1) {
+        return popupButtons[0];
+      }
+      var scopes = Array.prototype.slice.call(docRef.querySelectorAll('.modal.show, .modal'));
+      if (!scopes.length) {
+        scopes = [docRef];
+      }
+      for (var scopeIndex = 0; scopeIndex < scopes.length; scopeIndex += 1) {
+        if (!scopes[scopeIndex] || typeof scopes[scopeIndex].querySelectorAll !== 'function') {
+          continue;
+        }
+        var buttons = Array.prototype.slice.call(scopes[scopeIndex].querySelectorAll('button')).filter(function (button) {
+          return button && (!button.getClientRects || button.getClientRects().length);
+        });
+        for (var i = 0; i < buttons.length; i += 1) {
+          var text = normalizeText(buttons[i] && (buttons[i].textContent || buttons[i].innerText || ''));
+          if (plan.mode === 'fuel' && /^Refuel$/i.test(text)) {
+            return buttons[i];
+          }
+          if (plan.mode === 'repair' && /^Repair$/i.test(text)) {
+            return buttons[i];
+          }
+        }
+      }
+      return null;
+    }
+
+    function waitForShipMaintenancePopover(docRef, plan, attempt) {
+      var popup = findLatestShipMaintenancePopoverInDocument(docRef, plan);
+      if (popup) {
+        return Promise.resolve(popup);
+      }
+      if (attempt >= 10) {
+        return Promise.reject(new Error('未打开飞船维护弹层：' + plan.materialName));
+      }
+      return wait(150).then(function () {
+        return waitForShipMaintenancePopover(docRef, plan, attempt + 1);
+      });
+    }
+
+    function isLikelyShipDetailText(text) {
+      return textIncludesAny(normalizeText(text), ['Refuel', 'Repair', 'Start flight', 'Start Flight', 'Modify ship', 'Condition', 'Fuel', 'Arriving', 'arriving', 'Transit', 'Flight']);
+    }
+
+    function querySelectorAllMany(scope, selectors) {
+      if (!scope || typeof scope.querySelectorAll !== 'function') {
+        return [];
+      }
+      var result = [];
+      for (var i = 0; i < selectors.length; i += 1) {
+        result = result.concat(Array.prototype.slice.call(scope.querySelectorAll(selectors[i])));
+      }
+      return result.filter(function (node, index) {
+        return node && result.indexOf(node) === index;
+      });
+    }
+
+    function isExchangeWarehouseShipTabControl(control) {
+      if (!control || !control.getAttribute) {
+        return false;
+      }
+      var forAttr = normalizeText(control.getAttribute('for') || '');
+      var idAttr = normalizeText(control.getAttribute('id') || '');
+      return /^btnradio-whwt/i.test(forAttr) || /^btnradio-whwt/i.test(idAttr);
+    }
+
+    function findShipDetailScopeInDocument(docRef, shipName) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return null;
+      }
+      var scopes = querySelectorAllMany(docRef, ['.modal.show, .modal', '[role="dialog"]', '.offcanvas.show', '.card', '.panel']);
+      for (var i = 0; i < scopes.length; i += 1) {
+        var text = normalizeText(scopes[i] && (scopes[i].textContent || scopes[i].innerText || ''));
+        if (shipName && text.indexOf(shipName) < 0) {
+          continue;
+        }
+        if (isLikelyShipDetailText(text)) {
+          return scopes[i];
+        }
+      }
+      return null;
+    }
+
+    function findShipNameControlInScope(scope, shipName) {
+      if (!scope || !shipName || typeof scope.querySelectorAll !== 'function') {
+        return null;
+      }
+      var controls = Array.prototype.slice.call(scope.querySelectorAll('button, a, label, [role="tab"], [role="button"], .nav-link, .btn'));
+      for (var i = 0; i < controls.length; i += 1) {
+        var text = normalizeText(controls[i] && (controls[i].textContent || controls[i].innerText || ''));
+        if (text === shipName && !isExchangeWarehouseShipTabControl(controls[i]) && (!controls[i].getClientRects || controls[i].getClientRects().length)) {
+          return controls[i];
+        }
+      }
+      return null;
+    }
+
     function openShipInfoModalInDocument(docRef, ship) {
       var shipName = normalizeText(ship && (ship.name || ship.shipName));
       if (!docRef || !shipName || typeof docRef.querySelectorAll !== 'function') {
         return false;
       }
       var modals = Array.prototype.slice.call(docRef.querySelectorAll('.modal.show, .modal'));
-      var hasOpenModal = modals.some(function (modal) {
-        return normalizeText(modal && (modal.textContent || modal.innerText || '')).indexOf(shipName) >= 0;
-      });
-      if (hasOpenModal) {
+      for (var modalIndex = 0; modalIndex < modals.length; modalIndex += 1) {
+        var tab = findShipNameControlInScope(modals[modalIndex], shipName);
+        if (tab) {
+          return clickElement(tab);
+        }
+      }
+      var detailScope = findShipDetailScopeInDocument(docRef, shipName);
+      if (detailScope) {
         return true;
       }
       var links = Array.prototype.slice.call(docRef.querySelectorAll('span.link-primary, .link-primary'));
@@ -3096,7 +3889,38 @@
           return clickElement(links[i]);
         }
       }
+      var warehouseLabels = Array.prototype.slice.call(docRef.querySelectorAll('label[for^="btnradio-whwt"]'));
+      for (i = 0; i < warehouseLabels.length; i += 1) {
+        text = normalizeText(warehouseLabels[i] && (warehouseLabels[i].textContent || warehouseLabels[i].innerText || ''));
+        if (text === shipName) {
+          return clickElement(warehouseLabels[i]);
+        }
+      }
       return false;
+    }
+
+    function readOpenShipInfoText(docRef, ship) {
+      var shipName = normalizeText(ship && (ship.name || ship.shipName));
+      if (!docRef || !shipName || typeof docRef.querySelectorAll !== 'function') {
+        return '';
+      }
+      var detailScope = findShipDetailScopeInDocument(docRef, shipName);
+      if (detailScope) {
+        return normalizeText(detailScope.textContent || detailScope.innerText || '');
+      }
+      return '';
+    }
+
+    function inferOpenShipLocationText(docRef, ship) {
+      var text = readOpenShipInfoText(docRef, ship);
+      if (isExchangeLocationText(text)) {
+        return 'Exchange Station';
+      }
+      if (isTransitLocationText(text)) {
+        return 'transit';
+      }
+      var known = normalizeText(ship && ship.locationText);
+      return known || 'unknown';
     }
 
     function parseWarehouseAmountFromText(text) {
@@ -3140,16 +3964,19 @@
       if (!docRef || typeof docRef.querySelectorAll !== 'function') {
         throw new Error(plan.entryError);
       }
-      var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button[data-popup-id="' + plan.popupId + '"]'));
-      var entryButton = buttons.length === 1 ? buttons[0] : null;
+      var entryButton = findShipMaintenanceEntryButton(docRef, plan);
       if (!entryButton) {
         throw new Error(plan.entryError);
       }
       clickElement(entryButton);
-      var popup = findLatestPopoverInDocument(docRef);
+      var popup = findLatestShipMaintenancePopoverInDocument(docRef, plan);
       if (!popup) {
         throw new Error('未打开飞船维护弹层：' + plan.materialName);
       }
+      return completeShipMaintenanceFromPopup(popup, plan);
+    }
+
+    function completeShipMaintenanceFromPopup(popup, plan) {
       var inputs = visibleFormInputs(popup);
       var amountInput = inputs.filter(function (input) {
         return input && input.type === 'number';
@@ -3170,6 +3997,21 @@
         popupId: plan.popupId,
         amount: amount,
       };
+    }
+
+    function performShipMaintenanceInDocumentAsync(docRef, mode) {
+      var plan = findShipMaintenancePlan(mode);
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        throw new Error(plan.entryError);
+      }
+      var entryButton = findShipMaintenanceEntryButton(docRef, plan);
+      if (!entryButton) {
+        throw new Error(plan.entryError);
+      }
+      clickElement(entryButton);
+      return waitForShipMaintenancePopover(docRef, plan, 0).then(function (popup) {
+        return completeShipMaintenanceFromPopup(popup, plan);
+      });
     }
 
     function setSellOfferAmountInDocument(docRef, amount) {
@@ -3365,14 +4207,24 @@
       if (!docRef) {
         return false;
       }
+      var directButton = docRef.getElementById ? docRef.getElementById('exBuyButton') : null;
+      if (directButton && (!directButton.getClientRects || directButton.getClientRects().length) && !directButton.disabled) {
+        return clickElement(directButton);
+      }
       var buttons = Array.prototype.slice.call(docRef.querySelectorAll('button')).filter(function (node) {
-        return node && node.getClientRects && node.getClientRects().length && textIncludesAny(node.textContent || node.innerText || '', BUY_BUTTON_TEXTS);
+        return node &&
+          node.getClientRects &&
+          node.getClientRects().length &&
+          !(node.closest && node.closest('#gtap-panel')) &&
+          textIncludesAny(node.textContent || node.innerText || '', BUY_BUTTON_TEXTS);
       });
       for (var i = buttons.length - 1; i >= 0; i -= 1) {
         var html = String(buttons[i].innerHTML || '');
         if (
           html.indexOf('#arrow-down-to-line') >= 0 ||
           html.indexOf('arrow-down-to-line') >= 0 ||
+          html.indexOf('#down-to-bracket') >= 0 ||
+          html.indexOf('down-to-bracket') >= 0 ||
           html.indexOf('#download') >= 0 ||
           html.indexOf('download') >= 0 ||
           i === buttons.length - 1
@@ -3496,29 +4348,25 @@
       if (!doc) {
         return Promise.resolve(false);
       }
-      var baseButton = findUniqueButtonByTexts(doc, BASE_BUTTON_TEXTS);
-      if (baseButton) {
-        clickElement(baseButton);
-      }
-      return wait(700).then(function () {
-        var resupplyButton = findUniqueButtonByTexts(doc, RESUPPLY_BUTTON_TEXTS);
-        if (resupplyButton) {
-          clickElement(resupplyButton);
-        }
-        return wait(700);
-      }).then(function () {
-        applyResupplyDays(days);
-        return true;
-      });
+      return ensureBaseResupplyPage(state.lastSnapshot && state.lastSnapshot.base, days).then(function () { return true; });
     }
 
     function applyResupplyDays(days) {
       if (!doc) {
         return false;
       }
+      var directDaysInput = doc.getElementById ? doc.getElementById('days') : null;
+      var changed = false;
+      if (directDaysInput && directDaysInput.getClientRects && directDaysInput.getClientRects().length) {
+        changed = setInputValue(directDaysInput, String(days)) || changed;
+        return changed;
+      }
       var numberInputs = Array.prototype.slice.call(doc.querySelectorAll('input[type="number"], input'));
       for (var i = 0; i < numberInputs.length; i += 1) {
         var input = numberInputs[i];
+        if (input && input.id === 'days') {
+          return setInputValue(input, String(days));
+        }
         var placeholder = normalizeText(input.getAttribute('placeholder') || '');
         var aria = normalizeText(input.getAttribute('aria-label') || '');
         if (textIncludesAny(placeholder, ['day', 'days', '天']) || textIncludesAny(aria, ['day', 'days', '天'])) {
@@ -3532,7 +4380,8 @@
       var container = doc && doc.getElementById('gtap-config');
       var oldSellContainer = doc && doc.getElementById('gtap-old-sell-config');
       var sellContainer = doc && doc.getElementById('gtap-sell-config');
-      if (!container && !oldSellContainer && !sellContainer) {
+      var wishlistTransferContainer = doc && doc.getElementById('gtap-wishlist-transfer-config');
+      if (!container && !oldSellContainer && !sellContainer && !wishlistTransferContainer) {
         return;
       }
       if (!config) {
@@ -3551,14 +4400,21 @@
         if (oldSellContainer) {
           oldSellContainer.innerHTML = '<div style="opacity:.7;">点击“检查”后加载卖货配置。</div>';
         }
+        if (wishlistTransferContainer) {
+          wishlistTransferContainer.innerHTML = '<div style="opacity:.7;">点击“检查”后加载转移黑名单。</div>';
+        }
         return;
       }
       var effectiveConfig = Object.assign({}, config);
       if (!Array.isArray(effectiveConfig.sellBlacklist) || !effectiveConfig.sellBlacklist.length) {
         effectiveConfig.sellBlacklist = deepClone(DEFAULTS.sellBlacklist);
       }
+      if (!Array.isArray(effectiveConfig.wishlistTransferBlacklist) || !effectiveConfig.wishlistTransferBlacklist.length) {
+        effectiveConfig.wishlistTransferBlacklist = deepClone(DEFAULTS.wishlistTransferBlacklist);
+      }
       var whitelist = normalizeOutboundWhitelist((effectiveConfig && effectiveConfig.outboundWhitelist) || [], materialNames);
       var blacklist = normalizeMaterialBlocklist((effectiveConfig && effectiveConfig.sellBlacklist) || DEFAULTS.sellBlacklist, materialNames);
+      var transferBlacklist = normalizeMaterialBlocklist((effectiveConfig && effectiveConfig.wishlistTransferBlacklist) || DEFAULTS.wishlistTransferBlacklist, materialNames);
       var materialOptions = Object.keys(materialNames).map(function (id) {
         return { id: Number(id), name: materialNames[id] };
       }).sort(function (a, b) {
@@ -3594,6 +4450,21 @@
           materialOptions.replace('value="' + entry.id + '"', 'value="' + entry.id + '" selected'),
           '</select>',
           '<button data-config-action="remove-sell-blacklist-row" data-entry-id="' + entry.id + '" style="padding:5px 7px;">删除</button>',
+          '</div>'
+        ].join('');
+      }).join('');
+      var transferBlacklistRows = transferBlacklist.map(function (entry) {
+        return [
+          '<div data-wishlist-transfer-blacklist-row="' + entry.id + '" data-icon-id="' + escapeHtml(entry.iconId || '') + '" data-icon-href="' + escapeHtml(entry.iconHref || '') + '" style="display:grid;grid-template-columns:auto 24px minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:6px;">',
+          '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">',
+          '<input class="gtap-wishlist-transfer-blacklist-enabled" data-entry-id="' + entry.id + '" type="checkbox"' + (entry.enabled ? ' checked' : '') + '>',
+          '<span style="opacity:.85;">启用</span>',
+          '</label>',
+          materialIconHtml(entry, materialNames),
+          '<select class="gtap-wishlist-transfer-blacklist-material" data-entry-id="' + entry.id + '" style="min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#eef5ff;padding:5px 6px;">',
+          materialOptions.replace('value="' + entry.id + '"', 'value="' + entry.id + '" selected'),
+          '</select>',
+          '<button data-config-action="remove-wishlist-transfer-blacklist-row" data-entry-id="' + entry.id + '" style="padding:5px 7px;">删除</button>',
           '</div>'
         ].join('');
       }).join('');
@@ -3645,6 +4516,23 @@
           '<span>启用后该物资不会被“一键卖货”卖出。</span>',
           '<span>操作</span>',
           '</div>'
+        ].join('');
+      }
+      if (wishlistTransferContainer) {
+        wishlistTransferContainer.innerHTML = [
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">',
+          '<strong style="font-size:12px;">转移黑名单</strong>',
+          '<button data-config-action="add-wishlist-transfer-blacklist-row" style="padding:5px 7px;">新增</button>',
+          '</div>',
+          '<div data-wishlist-transfer-blacklist-list>',
+          transferBlacklistRows || '<div style="margin-top:6px;opacity:.7;">暂无黑名单，06 会逐项转移本轮购买物资。</div>',
+          '</div>',
+          '<div style="display:grid;grid-template-columns:24px 1fr auto;gap:6px;margin-top:6px;opacity:.7;font-size:11px;">',
+          '<span>图标</span>',
+          '<span>启用后 06 不会点击该物资行的转移按钮。</span>',
+          '<span>操作</span>',
+          '</div>',
+          '<div style="height:1px;background:rgba(255,255,255,0.10);margin:8px 0;"></div>'
         ].join('');
       }
     }
@@ -3703,12 +4591,40 @@
       });
     }
 
+    function readPanelWishlistTransferBlacklistEntries() {
+      if (!doc) {
+        return [];
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('[data-wishlist-transfer-blacklist-row]'));
+      return rows.map(function (row) {
+        var id = Number(row.getAttribute('data-wishlist-transfer-blacklist-row'));
+        var enabledInput = row.querySelector('.gtap-wishlist-transfer-blacklist-enabled');
+        var materialSelect = row.querySelector('.gtap-wishlist-transfer-blacklist-material');
+        var selectedId = Number(materialSelect && materialSelect.value || id);
+        var icon = Number(id) === Number(selectedId)
+          ? {
+            iconId: normalizeText(row.getAttribute('data-icon-id') || ''),
+            iconHref: normalizeText(row.getAttribute('data-icon-href') || ''),
+          }
+          : getMaterialIconMeta(selectedId, materialNames);
+        return {
+          id: selectedId,
+          enabled: !!(enabledInput && enabledInput.checked),
+          name: materialNames[selectedId] || ('物资 ' + selectedId),
+          iconId: icon.iconId,
+          iconHref: icon.iconHref,
+        };
+      });
+    }
+
     function readPanelDraftConfig(fallbackConfig) {
       var baseConfig = deepClone(fallbackConfig || (state.baseStore ? state.baseStore.read() : createBaseStore(storage, 'global').defaults));
       var resupplyDaysInput = doc && doc.getElementById('gtap-resupply-days');
       var whitelistRows = readPanelWhitelistEntries();
       var blacklistList = doc && doc.querySelector('[data-sell-blacklist-list]');
       var blacklistRows = readPanelSellBlacklistEntries();
+      var transferBlacklistList = doc && doc.querySelector('[data-wishlist-transfer-blacklist-list]');
+      var transferBlacklistRows = readPanelWishlistTransferBlacklistEntries();
       if (resupplyDaysInput) {
         baseConfig.resupplyDays = Math.max(1, parseInt(resupplyDaysInput.value, 10) || DEFAULTS.resupplyDays);
       }
@@ -3720,6 +4636,9 @@
       }
       if (blacklistList) {
         baseConfig.sellBlacklist = normalizeMaterialBlocklist(blacklistRows, materialNames);
+      }
+      if (transferBlacklistList) {
+        baseConfig.wishlistTransferBlacklist = normalizeMaterialBlocklist(transferBlacklistRows, materialNames);
       }
       return baseConfig;
     }
@@ -3779,6 +4698,33 @@
       renderConfig(next);
     }
 
+    function addWishlistTransferBlacklistRow() {
+      var next = readPanelDraftConfig();
+      var blacklist = normalizeMaterialBlocklist(next.wishlistTransferBlacklist || [], materialNames);
+      var used = new Set(blacklist.map(function (entry) { return Number(entry.id); }));
+      var candidateIds = Object.keys(materialNames).map(function (id) { return Number(id); }).sort(function (a, b) { return a - b; });
+      var nextId = candidateIds.find(function (id) {
+        return !used.has(id);
+      }) || candidateIds[0] || 1;
+      blacklist.push({
+        id: nextId,
+        enabled: true,
+        name: materialNames[nextId] || ('物资 ' + nextId),
+        iconId: getMaterialIconMeta(nextId, materialNames).iconId,
+        iconHref: getMaterialIconMeta(nextId, materialNames).iconHref,
+      });
+      next.wishlistTransferBlacklist = blacklist;
+      renderConfig(next);
+    }
+
+    function removeWishlistTransferBlacklistRow(entryId) {
+      var next = readPanelDraftConfig();
+      next.wishlistTransferBlacklist = normalizeMaterialBlocklist(next.wishlistTransferBlacklist || [], materialNames).filter(function (entry) {
+        return Number(entry.id) !== Number(entryId);
+      });
+      renderConfig(next);
+    }
+
     function handleConfigAction(button) {
       var action = button && button.getAttribute('data-config-action');
       var entryId = Number(button && button.getAttribute('data-entry-id'));
@@ -3795,6 +4741,13 @@
       }
       if (action === 'remove-sell-blacklist-row') {
         removeSellBlacklistRow(entryId);
+      }
+      if (action === 'add-wishlist-transfer-blacklist-row') {
+        addWishlistTransferBlacklistRow();
+        return;
+      }
+      if (action === 'remove-wishlist-transfer-blacklist-row') {
+        removeWishlistTransferBlacklistRow(entryId);
       }
     }
 
@@ -3966,6 +4919,7 @@
       planWishlistTransferBatch: planWishlistTransferBatch,
       planWishlistSendShipHome: planWishlistSendShipHome,
       planWishlistShipMaintenance: planWishlistShipMaintenance,
+      planWishlistAllExchangeShipMaintenance: planWishlistAllExchangeShipMaintenance,
       planShipSupportMaterialRestock: planShipSupportMaterialRestock,
       planExchangeInventorySellBatch: planExchangeInventorySellBatch,
       calculateSellOfferPrice: calculateSellOfferPrice,
@@ -3986,8 +4940,12 @@
       findButtonByIconHref: findButtonByIconHref,
       clickExchangeMaterialRowInDocument: clickExchangeMaterialRowInDocument,
       clickExchangeWarehouseSellButtonInDocument: clickExchangeWarehouseSellButtonInDocument,
+      readShipsFromPage: readShipsFromPage,
+      readExchangeShipsFromPage: readExchangeShipsFromPage,
+      readExchangeWarehouseShipsFromPage: readExchangeWarehouseShipsFromPage,
       openShipInfoModalInDocument: openShipInfoModalInDocument,
       performShipMaintenanceInDocument: performShipMaintenanceInDocument,
+      performShipMaintenanceInDocumentAsync: performShipMaintenanceInDocumentAsync,
       setTradeAmountInDocument: setTradeAmountInDocument,
       clickFinalBuyButtonInDocument: clickFinalBuyButtonInDocument,
       clickSellTabInDocument: clickSellTabInDocument,
@@ -4001,7 +4959,17 @@
       clickCreateOfferButtonInDocument: clickCreateOfferButtonInDocument,
       _testMoveShipToDestination: moveShipToDestination,
       _testRunWishlistClearBaseWishlist: runWishlistClearBaseWishlist,
+      _testRunWishlistCreateResupplyWishlist: runWishlistCreateResupplyWishlist,
+      _testRunWishlistBuyWishlist: runWishlistBuyWishlist,
+      _testRunWishlistTransferToShip: runWishlistTransferToShip,
+      _testRunWishlistShipMaintenance: runWishlistShipMaintenance,
+      _testRunRestockShipRepairMaterials: runRestockShipRepairMaterials,
+      _testRunWishlistAtomicAction: runWishlistAtomicAction,
+      _testTransferExchangeWarehouseToShip: transferExchangeWarehouseToShip,
+      _testClearWishlistFromUi: clearWishlistFromUi,
+      _testNavigateToExchangePage: navigateToExchangePage,
       _testBuyWishlistItemsFromUi: buyWishlistItemsFromUi,
+      _testBuyWishlistItemsFromWishlistPage: buyWishlistItemsFromWishlistPage,
       _testSellBatchOnExchange: sellBatchOnExchange,
       _testRenderConfig: renderConfig,
       _testBuildAtomicActionsHtml: buildAtomicActionsHtml,

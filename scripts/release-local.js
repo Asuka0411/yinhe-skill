@@ -153,13 +153,25 @@ function clickTampermonkeyUpdateButton() {
   return JSON.parse(raw);
 }
 
+function waitForTampermonkeyUpdatePage(options = {}) {
+  const timeoutMs = options.timeoutMs || 15000;
+  const intervalMs = options.intervalMs || 500;
+  const startedAt = Date.now();
+  let pageInfo = null;
+  do {
+    pageInfo = readActiveTampermonkeyPageInfo();
+    if (/^chrome-extension:\/\//.test(pageInfo.url) && /Tampermonkey|用户脚本|script/i.test(pageInfo.text)) {
+      return pageInfo;
+    }
+    wait(intervalMs);
+  } while (Date.now() - startedAt < timeoutMs);
+  throw new Error(`没有进入 Tampermonkey 更新页：${pageInfo ? pageInfo.url : '未知页面'}`);
+}
+
 function updateTampermonkey(updateUrl, options = {}) {
   openChromeUpdateTab(updateUrl);
-  wait(options.initialWaitMs || 2000);
-  const pageInfo = readActiveTampermonkeyPageInfo();
-  if (!/^chrome-extension:\/\//.test(pageInfo.url) || !/Tampermonkey|用户脚本|script/i.test(pageInfo.text)) {
-    throw new Error(`没有进入 Tampermonkey 更新页：${pageInfo.url}`);
-  }
+  wait(options.initialWaitMs || 1000);
+  const pageInfo = waitForTampermonkeyUpdatePage(options);
   const clickResult = clickTampermonkeyUpdateButton();
   if (!clickResult.ok) {
     throw new Error(`Tampermonkey 更新按钮点击失败：${JSON.stringify({ clickResult, pageInfo })}`);
@@ -236,4 +248,5 @@ module.exports = {
   parseUserscriptVersion,
   syncDownloadCopy,
   validateSourceVersions,
+  waitForTampermonkeyUpdatePage,
 };
