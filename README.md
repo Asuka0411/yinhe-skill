@@ -114,7 +114,7 @@ python3 -m http.server 18793
 
 ## 当前状态
 
-截至 `2026-06-09`，当前脚本版本为 `v0.1.59`，完整本地 Node 单测 `124/124` 通过。
+截至 `2026-06-10`，当前脚本版本为 `v0.1.60`，完整本地 Node 单测 `125/125` 通过。
 
 清空 wishlist 已支持按 `View Wishlist` 数量判断：数量为 `0` 时不进入交易所，数量大于 `0` 时进入对应 wishlist、点击编辑、执行 `Clear Wishlist`，完成后回到原基地页面。相关进度已整理到 [状态总览](/Users/dango/Documents/yinhe-skill/docs/superpowers/status/2026-06-08-galactic-tycoons-autopilot-status.md)。
 
@@ -129,6 +129,8 @@ python3 -m http.server 18793
 08 `一键补修理包、油` 已改为补交易所库存：复用现有补飞船修理材料逻辑，按交易所仓库现有数量把 `Antimatter (#149)` 与 `Ship Repair Kit (#113)` 补到目标库存 `2000`，购买前会计算差额，库存已达标时不购买。
 
 常规游戏操作应模拟玩家点击页面控件，不主动刷新页面。只有验证 Tampermonkey 持久安装是否生效时，才刷新页面确认版本。
+
+一键卖货已加固交易所导航校验：点击游戏内 `Exchange` 后必须确认地址进入交易所，或页面出现 `Exchange Warehouse`、`My Offers`、`Contracts`、交易所仓库卖货入口等交易所特征；如果仍停留在基地仓库页，会报 `未进入交易所页面` 并停止，不会继续查找或点击卖货按钮。
 
 ## 说明
 

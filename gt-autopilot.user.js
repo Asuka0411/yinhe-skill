@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.59
+// @version      0.1.60
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,7 +66,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.59';
+  var APP_VERSION = '0.1.60';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -3101,17 +3101,56 @@
       return Number((company && (company.credits || company.money || company.cash)) || 0) || 1000000000;
     }
 
+    function isLikelyExchangePageReady() {
+      if (!doc) {
+        return false;
+      }
+      if (/\/exchange/i.test(String(win.location && win.location.pathname || ''))) {
+        return true;
+      }
+      var bodyText = normalizeText(doc.body && (doc.body.textContent || doc.body.innerText || ''));
+      if (textIncludesAny(bodyText, ['Exchange Warehouse', 'My Offers', 'Contracts']) && !textIncludesAny(bodyText, ['BaseBuildingsWorkforceProductionWarehouse'])) {
+        return true;
+      }
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      for (var i = 0; i < rows.length; i += 1) {
+        var rowText = normalizeText(rows[i].textContent || rows[i].innerText || '');
+        if (!rowText || !textIncludesAny(rowText, ['$'])) {
+          continue;
+        }
+        var buttons = Array.prototype.slice.call(rows[i].querySelectorAll ? rows[i].querySelectorAll('button') : []);
+        for (var j = 0; j < buttons.length; j += 1) {
+          if (buttonLooksLikeSellWarehouseAction(buttons[j])) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function waitForExchangePageReady(attempt) {
+      if (isLikelyExchangePageReady()) {
+        return Promise.resolve(true);
+      }
+      if (attempt >= 10) {
+        return Promise.reject(new Error('未进入交易所页面'));
+      }
+      return wait(300).then(function () {
+        return waitForExchangePageReady(attempt + 1);
+      });
+    }
+
     function navigateToExchangePage() {
       if (!doc) {
         return Promise.resolve(false);
       }
-      if (/\/exchange/i.test(String(win.location.pathname || ''))) {
+      if (isLikelyExchangePageReady()) {
         return Promise.resolve(true);
       }
       var button = findUniqueButtonByTexts(doc, EXCHANGE_BUTTON_TEXTS);
       if (button) {
         clickElement(button);
-        return wait(1200).then(function () { return true; });
+        return waitForExchangePageReady(0);
       }
       return Promise.reject(new Error('未找到 Exchange 按钮'));
     }

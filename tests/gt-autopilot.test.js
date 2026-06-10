@@ -1850,7 +1850,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.59');
+  assert.equal(api.version, '0.1.60');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -3875,6 +3875,60 @@ test('切换交易所 helper 找不到游戏按钮时不会设置 location.href'
   );
   assert.equal(location.hrefSetCount, 0);
   assert.deepEqual(order, []);
+});
+
+test('切换交易所 helper 点击后仍停在基地仓库时会失败', async () => {
+  const order = [];
+  const location = {
+    pathname: '/base/13327',
+    href: 'https://g2.galactictycoons.com/base/13327?tab=warehouse&bt=14'
+  };
+  const exchangeButton = {
+    textContent: 'Exchange',
+    innerText: 'Exchange',
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      order.push('exchange-click');
+    }
+  };
+  const baseWarehouseRow = {
+    textContent: 'Basic Construction Kit 3,595 1,438t $3.3m',
+    innerText: 'Basic Construction Kit 3,595 1,438t $3.3m',
+    querySelectorAll(selector) {
+      if (selector === 'button') {
+        return [{ innerHTML: '<svg><use href="#arrow-right"></use></svg>', disabled: true }];
+      }
+      return [];
+    }
+  };
+  const api = createGtAutopilot({
+    document: {
+      querySelectorAll(selector) {
+        if (selector === 'button, a, [role="button"], [role="tab"]') {
+          return [exchangeButton];
+        }
+        if (selector === 'tr, [role="row"], .mat-row, .mat-item') {
+          return [baseWarehouseRow];
+        }
+        if (selector === 'button') {
+          return [exchangeButton];
+        }
+        return [];
+      }
+    },
+    window: { location },
+    setTimeout(resolve) {
+      resolve();
+    }
+  });
+
+  await assert.rejects(
+    () => api._testNavigateToExchangePage(),
+    /未进入交易所页面/
+  );
+  assert.deepEqual(order, ['exchange-click']);
 });
 
 test('交易物资行点击会精确选择 Antimatter 而不是 Antimatter Containment', () => {
