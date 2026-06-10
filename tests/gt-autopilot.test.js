@@ -1628,7 +1628,7 @@ function createMultiShipMaintenanceDoc(entries) {
         }));
       }
       if (selector === '.modal.show, .modal') {
-        return state.currentShip ? [{ textContent: 'Ships ' + state.currentShip + ' ' + state.currentLocation + ' Refuel Repair' }] : [];
+        return state.currentShip ? [{ textContent: 'Ships ' + state.currentShip + ' ' + state.currentLocation + ' Refuel Repair' + (entries.some((entry) => entry.includeStartFlightText) ? ' Start flight' : '') }] : [];
       }
       if (selector === 'span.link-primary, .link-primary') {
         return entries.some((entry) => entry.hideShipLink) ? [] : ships.map((ship) => ship.link);
@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.68');
+  assert.equal(api.version, '0.1.69');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -3639,6 +3639,25 @@ test('飞船补油修理原子功能会逐个切换飞船并跳过不在交易�
     'confirm:200000 反物质-04:fuel:2956',
     'trigger:200000 反物质-04:repair',
     'confirm:200000 反物质-04:repair:1900',
+  ]);
+});
+
+test('飞船补油修理读取当前位置时不会把 Start flight 按钮误判为 transit', async () => {
+  const doc = createMultiShipMaintenanceDoc([
+    { name: '200000 反物质-09', location: '0-冶炼 合金09', includeStartFlightText: true },
+  ]);
+  const api = createGtAutopilot({
+    document: doc,
+    setTimeout(callback) {
+      callback();
+    }
+  });
+
+  const result = await api._testRunWishlistShipMaintenance({}, 'fuel_and_repair');
+
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(result.skipped.map((entry) => ({ name: entry.ship.name, locationText: entry.locationText })), [
+    { name: '200000 反物质-09', locationText: '0-冶炼 合金09' },
   ]);
 });
 
