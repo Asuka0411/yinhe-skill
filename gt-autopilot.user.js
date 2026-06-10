@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.69
+// @version      0.1.70
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,14 +66,14 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.69';
+  var APP_VERSION = '0.1.70';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
     { action: 'buy_wishlist', label: '一键购买 wishlist', status: 'ready' },
     { action: 'fuel_and_repair_ship', label: '一键加油、修理', status: 'ready' },
-    { action: 'repair_base_buildings', label: '一键修基地建筑' },
-    { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' },
+    { action: 'repair_base_buildings', label: '一键修基地建筑', status: 'ready' },
+    { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料', status: 'ready' },
   ];
   var WISHLIST_RESUPPLY_ATOMIC_STEPS = [
     { action: 'wishlist_read_current_base', label: '读取当前基地', status: 'done' },
@@ -99,6 +99,7 @@
     { id: 149, name: 'Antimatter', targetAmount: 2000, role: 'fuel' },
     { id: 113, name: 'Ship Repair Kit', targetAmount: 2000, role: 'repair' },
   ];
+  var BASE_BUILDING_REPAIR_THRESHOLD = 0.9;
 
   function normalizeText(value) {
     return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
@@ -207,6 +208,34 @@
         role: material.role,
       };
     }).filter(Boolean);
+  }
+
+  function planBaseBuildingRepair(base, options) {
+    var opts = options || {};
+    var threshold = Number(opts.threshold);
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      threshold = BASE_BUILDING_REPAIR_THRESHOLD;
+    }
+    var slots = base && Array.isArray(base.buildingSlots) ? base.buildingSlots : [];
+    return slots.map(function (slot) {
+      var building = slot && slot.building;
+      if (!building) {
+        return null;
+      }
+      var cond = Number(building.cond != null ? building.cond : building.condition);
+      if (!Number.isFinite(cond) || cond >= threshold) {
+        return null;
+      }
+      return {
+        slotId: Number(slot.id != null ? slot.id : 0),
+        buildingId: Number(building.id != null ? building.id : 0),
+        type: Number(building.type != null ? building.type : 0),
+        level: Number(building.level != null ? building.level : 0),
+        cond: cond,
+      };
+    }).filter(Boolean).sort(function (a, b) {
+      return a.cond - b.cond;
+    });
   }
 
   function normalizeMaterialBlocklist(entries, materialNames) {
@@ -2050,6 +2079,24 @@
       });
     }
 
+    function runRepairBaseBuildings(snapshot) {
+      var base = snapshot && snapshot.base;
+      var plan = planBaseBuildingRepair(base);
+      pushStep('检查基地建筑', plan.length ? plan.map(function (item) {
+        return '#' + item.buildingId + ' 耐久 ' + Math.round(item.cond * 100) + '%';
+      }).join('，') : '所有建筑耐久充足');
+      if (!plan.length) {
+        pushStep('修基地建筑', '无需修理');
+        return Promise.resolve({ repaired: 0, plan: [] });
+      }
+      var repairFn = testHooks.repairBaseBuildingsInDocumentAsync || repairBaseBuildingsInDocumentAsync;
+      return Promise.resolve(repairFn(doc)).then(function (summary) {
+        var repaired = summary && summary.repaired ? summary.repaired : 0;
+        pushStep('修基地建筑完成', repaired ? ('已点击修理 ' + repaired + ' 个建筑') : '未找到可点击的修理按钮');
+        return { repaired: repaired, plan: plan };
+      });
+    }
+
     function runSellExchangeInventory(snapshot) {
       var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.defaults : deepClone(DEFAULTS));
       var plan = planExchangeInventorySellBatch(snapshot && snapshot.exchangeWarehouse, config);
@@ -2412,6 +2459,29 @@
               action: result.action,
               label: result.label,
               bought: summary.bought,
+              plan: summary.plan,
+            });
+          });
+        }).catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('原子功能失败', state.lastError);
+          finishRun('failed', { action: result.action, label: result.label, error: state.lastError });
+        });
+        return;
+      }
+      if (result.action === 'repair_base_buildings') {
+        if (state.running) {
+          pushStep('忙碌', '已有任务在运行');
+          return;
+        }
+        readBaseContext().then(function (snapshot) {
+          startRun('atomic_' + result.action);
+          pushStep('原子功能', result.label);
+          return runRepairBaseBuildings(snapshot).then(function (summary) {
+            finishRun('success', {
+              action: result.action,
+              label: result.label,
+              repaired: summary.repaired,
               plan: summary.plan,
             });
           });
@@ -4204,6 +4274,71 @@
       });
     }
 
+    function findBaseBuildingRepairButtons(docRef) {
+      if (!docRef || typeof docRef.querySelectorAll !== 'function') {
+        return [];
+      }
+      return Array.prototype.slice.call(docRef.querySelectorAll('button')).filter(function (button) {
+        if (!button) {
+          return false;
+        }
+        if (button.getClientRects && !button.getClientRects().length) {
+          return false;
+        }
+        var text = normalizeText(button.textContent || button.innerText || '');
+        if (!/^Repair$/i.test(text)) {
+          return false;
+        }
+        if (button.getAttribute && normalizeText(button.getAttribute('data-popup-id'))) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function findBaseBuildingRepairConfirmButton(docRef) {
+      var popup = findLatestPopoverInDocument(docRef);
+      if (!popup || typeof popup.querySelectorAll !== 'function') {
+        return null;
+      }
+      var buttons = Array.prototype.slice.call(popup.querySelectorAll('button')).filter(function (button) {
+        return button && (!button.getClientRects || button.getClientRects().length);
+      });
+      for (var i = 0; i < buttons.length; i += 1) {
+        var text = normalizeText(buttons[i].textContent || buttons[i].innerText || '');
+        if (textIncludesAny(text, ['Confirm', '确认', '确定', 'Yes', 'OK', 'Repair'])) {
+          return buttons[i];
+        }
+      }
+      return null;
+    }
+
+    function repairBaseBuildingsInDocumentAsync(docRef) {
+      var buttons = findBaseBuildingRepairButtons(docRef);
+      if (!buttons.length) {
+        return Promise.resolve({ repaired: 0, total: 0 });
+      }
+      var repaired = 0;
+      function step(index) {
+        if (index >= buttons.length) {
+          return Promise.resolve({ repaired: repaired, total: buttons.length });
+        }
+        clickElement(buttons[index]);
+        repaired += 1;
+        return wait(150).then(function () {
+          var confirmButton = findBaseBuildingRepairConfirmButton(docRef);
+          if (confirmButton) {
+            clickElement(confirmButton);
+            return wait(150);
+          }
+          return null;
+        }).then(function () {
+          return step(index + 1);
+        });
+      }
+      return step(0);
+    }
+
     function setSellOfferAmountInDocument(docRef, amount) {
       if (!docRef) {
         return false;
@@ -5111,6 +5246,7 @@
       planWishlistShipMaintenance: planWishlistShipMaintenance,
       planWishlistAllExchangeShipMaintenance: planWishlistAllExchangeShipMaintenance,
       planShipSupportMaterialRestock: planShipSupportMaterialRestock,
+      planBaseBuildingRepair: planBaseBuildingRepair,
       planExchangeInventorySellBatch: planExchangeInventorySellBatch,
       calculateSellOfferPrice: calculateSellOfferPrice,
       validateSellOfferBeforeSubmit: validateSellOfferBeforeSubmit,
@@ -5136,6 +5272,8 @@
       openShipInfoModalInDocument: openShipInfoModalInDocument,
       performShipMaintenanceInDocument: performShipMaintenanceInDocument,
       performShipMaintenanceInDocumentAsync: performShipMaintenanceInDocumentAsync,
+      findBaseBuildingRepairButtons: findBaseBuildingRepairButtons,
+      repairBaseBuildingsInDocumentAsync: repairBaseBuildingsInDocumentAsync,
       setTradeAmountInDocument: setTradeAmountInDocument,
       clickFinalBuyButtonInDocument: clickFinalBuyButtonInDocument,
       clickSellTabInDocument: clickSellTabInDocument,
@@ -5154,6 +5292,7 @@
       _testRunWishlistTransferToShip: runWishlistTransferToShip,
       _testRunWishlistShipMaintenance: runWishlistShipMaintenance,
       _testRunRestockShipRepairMaterials: runRestockShipRepairMaterials,
+      _testRunRepairBaseBuildings: runRepairBaseBuildings,
       _testRunWishlistAtomicAction: runWishlistAtomicAction,
       _testTransferExchangeWarehouseToShip: transferExchangeWarehouseToShip,
       _testClearWishlistFromUi: clearWishlistFromUi,

@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.69');
+  assert.equal(api.version, '0.1.70');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -1995,8 +1995,8 @@ test('原子功能按钮定义合并加油修理并保留修建筑、补材料',
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
     { action: 'buy_wishlist', label: '一键购买 wishlist', status: 'ready' },
     { action: 'fuel_and_repair_ship', label: '一键加油、修理', status: 'ready' },
-    { action: 'repair_base_buildings', label: '一键修基地建筑' },
-    { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' }
+    { action: 'repair_base_buildings', label: '一键修基地建筑', status: 'ready' },
+    { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料', status: 'ready' }
   ]);
 });
 
@@ -4107,6 +4107,234 @@ test('一键补飞船修理材料在交易所仓库为空时会购买两种物�
     { id: 149, name: 'Antimatter', amount: 2000, current: 0, targetAmount: 2000, role: 'fuel' },
     { id: 113, name: 'Ship Repair Kit', amount: 2000, current: 0, targetAmount: 2000, role: 'repair' }
   ]);
+});
+
+test('planBaseBuildingRepair 选出耐久低于阈值的建筑并按耐久升序排列', () => {
+  const api = createGtAutopilot();
+  const plan = api.planBaseBuildingRepair({
+    buildingSlots: [
+      { id: 1, status: 2, building: { id: 11, type: 1, level: 3, cond: 0.95 } },
+      { id: 2, status: 2, building: { id: 12, type: 2, level: 1, cond: 0.4 } },
+      { id: 3, status: 2, building: { id: 13, type: 9, level: 5, cond: 0.7 } }
+    ]
+  });
+
+  assert.deepEqual(plan, [
+    { slotId: 2, buildingId: 12, type: 2, level: 1, cond: 0.4 },
+    { slotId: 3, buildingId: 13, type: 9, level: 5, cond: 0.7 }
+  ]);
+});
+
+test('planBaseBuildingRepair 跳过空槽与无建筑的槽', () => {
+  const api = createGtAutopilot();
+  const plan = api.planBaseBuildingRepair({
+    buildingSlots: [
+      { id: 1, status: 1, building: null },
+      { id: 2, status: 3 },
+      { id: 3, status: 2, building: { id: 30, type: 5, level: 1, cond: 0.2 } }
+    ]
+  });
+
+  assert.deepEqual(plan, [
+    { slotId: 3, buildingId: 30, type: 5, level: 1, cond: 0.2 }
+  ]);
+});
+
+test('planBaseBuildingRepair 兼容 condition 字段并支持自定义阈值', () => {
+  const api = createGtAutopilot();
+  const plan = api.planBaseBuildingRepair({
+    buildingSlots: [
+      { id: 1, status: 2, building: { id: 41, type: 1, level: 1, condition: 0.5 } },
+      { id: 2, status: 2, building: { id: 42, type: 1, level: 1, condition: 0.85 } }
+    ]
+  }, { threshold: 0.6 });
+
+  assert.deepEqual(plan, [
+    { slotId: 1, buildingId: 41, type: 1, level: 1, cond: 0.5 }
+  ]);
+});
+
+test('planBaseBuildingRepair 在没有建筑数据时返回空数组', () => {
+  const api = createGtAutopilot();
+  assert.deepEqual(api.planBaseBuildingRepair({}), []);
+  assert.deepEqual(api.planBaseBuildingRepair(null), []);
+});
+
+function createBaseBuildingRepairDoc(options = {}) {
+  const buildingCount = options.buildings == null ? 2 : options.buildings;
+  const clicks = [];
+  const allButtons = [];
+  for (let i = 0; i < buildingCount; i += 1) {
+    const label = 'building-' + i;
+    allButtons.push({
+      textContent: 'Repair',
+      innerText: 'Repair',
+      getClientRects() {
+        return [{}];
+      },
+      getAttribute() {
+        return '';
+      },
+      click() {
+        clicks.push(label);
+      }
+    });
+  }
+  if (options.includeShipRepair) {
+    allButtons.push({
+      textContent: 'Repair',
+      innerText: 'Repair',
+      getClientRects() {
+        return [{}];
+      },
+      getAttribute(name) {
+        return name === 'data-popup-id' ? 'shipRepair' : '';
+      },
+      click() {
+        clicks.push('ship-repair');
+      }
+    });
+  }
+  const popup = options.withConfirmPopup ? {
+    querySelectorAll(selector) {
+      if (selector !== 'button') {
+        return [];
+      }
+      return [{
+        textContent: 'Confirm',
+        innerText: 'Confirm',
+        getClientRects() {
+          return [{}];
+        },
+        click() {
+          clicks.push('confirm');
+        }
+      }];
+    }
+  } : null;
+  return {
+    clicks,
+    querySelectorAll(selector) {
+      if (selector === 'button') {
+        return allButtons;
+      }
+      if (selector === '.popover') {
+        return popup ? [popup] : [];
+      }
+      return [];
+    }
+  };
+}
+
+test('修基地建筑 helper 会点击所有建筑 Repair 按钮', async () => {
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    }
+  });
+  const doc = createBaseBuildingRepairDoc({ buildings: 3 });
+
+  const result = await api.repairBaseBuildingsInDocumentAsync(doc);
+
+  assert.deepEqual(result, { repaired: 3, total: 3 });
+  assert.deepEqual(doc.clicks, ['building-0', 'building-1', 'building-2']);
+});
+
+test('修基地建筑 helper 会在每次修理后点击确认弹层', async () => {
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    }
+  });
+  const doc = createBaseBuildingRepairDoc({ buildings: 2, withConfirmPopup: true });
+
+  const result = await api.repairBaseBuildingsInDocumentAsync(doc);
+
+  assert.deepEqual(result, { repaired: 2, total: 2 });
+  assert.deepEqual(doc.clicks, ['building-0', 'confirm', 'building-1', 'confirm']);
+});
+
+test('修基地建筑 helper 不会点击飞船维护 Repair 按钮', async () => {
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    }
+  });
+  const doc = createBaseBuildingRepairDoc({ buildings: 1, includeShipRepair: true });
+
+  const result = await api.repairBaseBuildingsInDocumentAsync(doc);
+
+  assert.deepEqual(result, { repaired: 1, total: 1 });
+  assert.deepEqual(doc.clicks, ['building-0']);
+});
+
+test('修基地建筑 helper 在没有 Repair 按钮时返回 0', async () => {
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    }
+  });
+  const doc = createBaseBuildingRepairDoc({ buildings: 0 });
+
+  const result = await api.repairBaseBuildingsInDocumentAsync(doc);
+
+  assert.deepEqual(result, { repaired: 0, total: 0 });
+  assert.deepEqual(doc.clicks, []);
+});
+
+test('runRepairBaseBuildings 在有低耐久建筑时会按计划逐个修理', async () => {
+  let repairCalled = false;
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    },
+    __testHooks: {
+      repairBaseBuildingsInDocumentAsync() {
+        repairCalled = true;
+        return Promise.resolve({ repaired: 2, total: 2 });
+      }
+    }
+  });
+
+  const result = await api._testRunRepairBaseBuildings({
+    base: {
+      buildingSlots: [
+        { id: 1, building: { id: 11, type: 1, level: 1, cond: 0.4 } },
+        { id: 2, building: { id: 12, type: 2, level: 1, cond: 0.95 } },
+        { id: 3, building: { id: 13, type: 3, level: 1, cond: 0.7 } }
+      ]
+    }
+  });
+
+  assert.equal(repairCalled, true);
+  assert.equal(result.repaired, 2);
+  assert.deepEqual(result.plan.map((item) => item.buildingId), [11, 13]);
+});
+
+test('runRepairBaseBuildings 在所有建筑耐久充足时不会修理', async () => {
+  let repairCalled = false;
+  const api = createGtAutopilot({
+    setTimeout(callback) {
+      callback();
+    },
+    __testHooks: {
+      repairBaseBuildingsInDocumentAsync() {
+        repairCalled = true;
+        return Promise.resolve({ repaired: 0, total: 0 });
+      }
+    }
+  });
+
+  const result = await api._testRunRepairBaseBuildings({
+    base: {
+      buildingSlots: [
+        { id: 1, building: { id: 11, type: 1, level: 1, cond: 0.95 } }
+      ]
+    }
+  });
+
+  assert.deepEqual(result, { repaired: 0, plan: [] });
+  assert.equal(repairCalled, false);
 });
 
 test('交易购买 helper 会填目标数量并点击最终 Buy 按钮', () => {

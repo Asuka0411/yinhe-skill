@@ -28,7 +28,7 @@
 
 ## 当前验证状态
 
-截至 2026-06-10，当前脚本版本为 `v0.1.69`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `135/135` 通过。
+截至 2026-06-10，当前脚本版本为 `v0.1.70`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `145/145` 通过。
 
 本轮已完成：
 
@@ -99,6 +99,12 @@
 - 已通过只读查询确认当前游戏页补货回运原子步骤数量为 9，且不存在 05 `打开交易所` 与 06 `读取 wishlist`
 - 已通过只读查询确认当前游戏页中 01、02、03、04、05 原子按钮状态均为 `done` 且显示绿色
 - 本次发布与验证未刷新游戏页面，未点击 05
+- `v0.1.70` 新增 `一键修基地建筑` 原子功能，按钮状态为 `可测试`
+- `planBaseBuildingRepair` 会从基地 `buildingSlots` 选出耐久 `cond` 低于阈值 `0.9` 的建筑并按耐久升序排列；兼容 `condition` 字段，支持自定义阈值
+- `一键修基地建筑` 执行流程：读取当前基地后用 `planBaseBuildingRepair` 判断是否有低耐久建筑；无低耐久时提示无需修理且不操作页面
+- DOM 操作按玩家点击流程：在基地页面逐个点击文本为 `Repair` 的建筑修理按钮，排除带 `data-popup-id` 的飞船维护按钮，避免误点飞船 `Refuel`/`Repair`；每次点击后若出现确认弹层则点击确认
+- 已为 `一键修基地建筑` 增加单元测试：点击全部建筑 `Repair`、每次修理后确认弹层、排除飞船维护按钮、无按钮时返回 0，以及执行函数在有无低耐久建筑时的分支
+- 已执行 `npm run release:local`：先用 `python3 -m http.server 18793` 启动本地更新源，5 步全部通过（版本校验、`145/145` 测试、同步下载副本、更新源版本校验、Tampermonkey 自动更新），持久安装更新目标推进到 `v0.1.70`
 
 ## 已验证链路
 
@@ -111,6 +117,7 @@
 
 1. 在真实登录态 Chrome 中做小额、可控验证
 2. 后续发布继续使用 `npm run release:local`；`node scripts/hot-reload-chrome.js` 仅用于临时调试，不作为持久更新方式
+3. 在真实游戏基地页面实测 `一键修基地建筑`：确认能正确点击低耐久建筑的 `Repair` 并完成修理；实测通过后把按钮状态从 `可测试` 改为 `已验证` 并同步绿色样式
 
 ## 相关文档
 
