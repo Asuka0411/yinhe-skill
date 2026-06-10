@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.65');
+  assert.equal(api.version, '0.1.66');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -3053,6 +3053,66 @@ test('06 转移到飞船会用实时选中的 Exchange 货仓修正旧 transit �
   assert.deepEqual(transfer.transferSummary, [
     { name: 'Bioxene', amount: 16616 }
   ]);
+});
+
+test('06 转移到飞船在交易所页基地上下文丢失时信任实时选中货仓', async () => {
+  const order = [];
+  const doc = createExchangeWarehouseTransferAllDoc(order, {
+    initialShip: '200000 反物质-10',
+    shipNames: ['200000 反物质-09', '200000 反物质-10']
+  });
+  const api = createGtAutopilot({
+    document: doc,
+    setTimeout(resolve) {
+      resolve();
+    },
+    __testHooks: {
+      readWishlistRowsFromApi: () => Promise.resolve([
+        { id: 12, name: 'Bioxene', amount: 16616, weight: 1 }
+      ])
+    }
+  });
+
+  const transfer = await api._testRunWishlistTransferToShip({
+    location: 'https://g2.galactictycoons.com/exchange/?tab=exchange',
+    base: { id: 9, name: '0-冶炼 合金09', planetId: 877 },
+    company: {
+      exWhId: 202,
+      ships: [
+        {
+          id: 9,
+          name: '200000 反物质-09',
+          warehouseId: 0,
+          pId: 0,
+          flight: { aDate: '2026-06-09T12:00:00Z' }
+        },
+        {
+          id: 10,
+          name: '200000 反物质-10',
+          warehouseId: 0,
+          pId: 0,
+          flight: { aDate: '2026-06-09T12:00:00Z' }
+        }
+      ]
+    },
+    shipInfo: {
+      location: 'transit',
+      ship: {
+        id: 9,
+        name: '200000 反物质-09',
+        warehouseId: 0,
+        pId: 0,
+        flight: { aDate: '2026-06-09T12:00:00Z' }
+      }
+    }
+  });
+
+  assert.deepEqual(order, [
+    'ship:200000 反物质-10',
+    'row-transfer:Bioxene',
+    'confirm:Bioxene'
+  ]);
+  assert.deepEqual(transfer.ship, { name: '200000 反物质-10', locationText: 'Exchange Station' });
 });
 
 test('转移到飞船原子功能会把 wishlist 条目转成装船批次', () => {
