@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.63');
+  assert.equal(api.version, '0.1.64');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -4264,6 +4264,32 @@ test('inferShipLocation 在 Exchange 仓库页会从已选飞船仓库标签推�
 
   assert.equal(result.location, 'exchange');
   assert.deepEqual(result.ship, { name: '200000 反物质-01', locationText: 'Exchange Station' });
+});
+
+test('inferShipLocation 在页面已选 Exchange 货仓时会覆盖公司 flight 旧状态', () => {
+  const api = createGtAutopilot();
+  const base = { id: 10, name: '0-冶炼 合金10', warehouseId: 101, planetId: 501 };
+  const doc = createExchangeShipWarehouseTabsDoc([
+    { id: 'btnradio-whwt36386', name: '200000 反物质-09' },
+    { id: 'btnradio-whwt39889', name: '200000 反物质-10', checked: true }
+  ]);
+  const company = {
+    exWhId: 202,
+    ships: [
+      {
+        id: 10,
+        name: '200000 反物质-10',
+        warehouseId: 0,
+        pId: 0,
+        flight: { aDate: '2026-06-09T12:00:00Z' }
+      }
+    ]
+  };
+
+  const result = api.inferShipLocation(company, base, doc);
+
+  assert.equal(result.location, 'exchange');
+  assert.deepEqual(result.ship, { name: '200000 反物质-10', locationText: 'Exchange Station' });
 });
 
 test('findDestinationSuggestionByText 会优先命中飞船弹窗下拉项', () => {

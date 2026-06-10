@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.63
+// @version      0.1.64
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,7 +66,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.63';
+  var APP_VERSION = '0.1.64';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -1254,6 +1254,7 @@
     var baseWarehouseId = base && base.warehouseId;
     var basePlanetId = base && base.planetId;
     var exchangeWarehouseId = company && company.exWhId;
+    var pageSelectedExchangeShip = readSelectedExchangeWarehouseShipFromPage(doc);
     var ship = null;
     var exchangeShip = null;
     var transitShip = null;
@@ -1263,6 +1264,13 @@
 
     if (ships.length === 0) {
       return inferShipLocationFromPage(doc, base) || { location: 'unknown', ship: null };
+    }
+
+    if (pageSelectedExchangeShip && (
+      shipMatchesBase(pageSelectedExchangeShip, base) ||
+      (hintedShip && normalizeText(hintedShip.name) === normalizeText(pageSelectedExchangeShip.name))
+    )) {
+      return { location: 'exchange', ship: pageSelectedExchangeShip };
     }
 
     ship = hintedShip || ships[0];

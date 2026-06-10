@@ -114,7 +114,7 @@ python3 -m http.server 18793
 
 ## 当前状态
 
-截至 `2026-06-10`，当前脚本版本为 `v0.1.63`，完整本地 Node 单测 `129/129` 通过。
+截至 `2026-06-10`，当前脚本版本为 `v0.1.64`，完整本地 Node 单测 `130/130` 通过。
 
 清空 wishlist 已支持按 `View Wishlist` 数量判断：数量为 `0` 时不进入交易所，数量大于 `0` 时进入对应 wishlist、点击编辑、执行 `Clear Wishlist`，完成后回到原基地页面。相关进度已整理到 [状态总览](/Users/dango/Documents/yinhe-skill/docs/superpowers/status/2026-06-08-galactic-tycoons-autopilot-status.md)。
 
@@ -123,6 +123,8 @@ python3 -m http.server 18793
 05 `购买 wishlist` 已完成玩家实测验证：会先在 `Resupply` 页面点击 `View Wishlist`，进入交易所 wishlist 后逐项点击 wishlist 物资行，确认右侧 `#exchangeTradeMatCard` 购买面板物资名与购买数量后点击游戏真实 `#exBuyButton`。点击后必须确认该物资的 wishlist 行已从页面移除，才会记录为已购买。购买后 wishlist 会被游戏移除，因此脚本会保存本轮购买清单，06 `转移到飞船` 优先使用该清单，不再依赖已清空的 wishlist。
 
 06 `转移到飞船` 当前为可测试：进入交易所仓库后先点击目标飞船标签，随后读取 `input[id^="btnradio-whwt"].checked` 对应的标签或 active 标签，核对当前真实选中飞船必须等于目标飞船；如果仍选中其他飞船，立即失败并且不会点击任何物资转移按钮。核对通过后，脚本按本轮购买清单逐项点击非黑名单物资行的右箭头，并在每个转移弹窗里点击确认勾。`一键购买 wishlist` 展开面板内新增 `转移黑名单` 配置，默认保护 `Ship Repair Kit (#113)` 与 `Antimatter (#149)`；启用的黑名单物资不会被点击转移，避免先转进飞船再尝试移回。已修复 06 在交易所仓库页报“飞船不在交易所：当前位置=unknown”的问题：当页面只有 `btnradio-whwt` 飞船仓库标签、没有 Ships 列表时，脚本会从已选飞船仓库标签推断飞船在 `Exchange Station`。
+
+06 `转移到飞船` 已进一步修复 10 号船误判 `transit` 的问题：当真实页面已经选中目标飞船的 Exchange 货仓标签，并且页面显示 `Exchange Station` 时，脚本会用页面真实选中状态覆盖 Local API 中可能滞后的 flight 状态。
 
 07 `飞船补油修理` 已接入可测试流程：逐个点击候选飞船标签切换当前飞船，读取当前飞船详情位置；不在 `Exchange Station` 的飞船会记录跳过并继续下一艘，不会停止整步。位于交易所的飞船会依次点击可见的 `Refuel` 与 `Repair` 按钮，等待真正的维护弹层打开后填入游戏允许的最大数量并确认；若先出现 tooltip 或其他没有数量输入框的 `.popover`，脚本会忽略并继续等待维护弹层。修理阶段还会拒绝复用补油后残留的 `Refuel` 弹层，必须等到文本匹配 `Repair` / `Condition` / `Kit` 的修理弹层。切换飞船时必须点击飞船详情面板顶部精确匹配目标船名的标签，不能因为详情区域顶部列表包含目标船名就认为已经切换成功；在交易所仓库飞船货仓页，只有飞船名与货物表、没有 `Refuel` / `Repair` / `Start flight` 等维护控件时，必须点击蓝色飞船名字进入真正的飞船维护详情，不能把 `btnradio-whwt` 货仓标签当成维护详情入口。
 
