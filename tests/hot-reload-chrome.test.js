@@ -49,3 +49,20 @@ test('validateInjectionResult 会拒绝 Chrome 错误页伪成功', () => {
     /热更新目标实际页面不是 Galactic Tycoons/
   );
 });
+
+test('parseInjectedScriptResult 会拒绝 Chrome missing value', () => {
+  assert.throws(
+    () => hotReload.parseInjectedScriptResult('missing value'),
+    /Chrome 没有返回热更新结果/
+  );
+});
+
+test('parseInjectedScriptResult 会输出页面注入错误', () => {
+  assert.throws(
+    () => hotReload.parseInjectedScriptResult(JSON.stringify({
+      ok: false,
+      error: 'Unexpected end of input',
+    })),
+    /热更新注入失败：Unexpected end of input/
+  );
+});

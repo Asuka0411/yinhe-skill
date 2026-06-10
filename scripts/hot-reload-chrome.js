@@ -90,28 +90,58 @@ function pushSourceChunks(target, source) {
 function runInjectedScript(target) {
   const rawResult = executeJavaScriptInChromeTab(target, `
     (function () {
-      var code = window.__GT_HOT_RELOAD_PARTS.join('');
-      delete window.__GT_HOT_RELOAD_PARTS;
-      (0, eval)(code);
-      if (!window.__GT_AUTOPILOT_APP__ && window.createGalacticTycoonsAutopilot) {
-        window.__GT_AUTOPILOT_APP__ = window.createGalacticTycoonsAutopilot(window).start();
-      }
-      var clearButton = document.querySelector('button[data-atomic-action="wishlist_clear_base_wishlist"]');
-      return JSON.stringify({
-        url: location.href,
-        version: window.__GT_AUTOPILOT_APP__ && window.__GT_AUTOPILOT_APP__.version,
-        panel: document.getElementById('gtap-panel') && document.getElementById('gtap-panel').innerText.slice(0, 120),
-        clearButton: clearButton && {
-          text: clearButton.innerText,
-          status: clearButton.getAttribute('data-atomic-status'),
-          style: clearButton.getAttribute('style'),
-          background: getComputedStyle(clearButton).backgroundImage || getComputedStyle(clearButton).backgroundColor,
-          color: getComputedStyle(clearButton).color
+      try {
+        if (!Array.isArray(window.__GT_HOT_RELOAD_PARTS) || !window.__GT_HOT_RELOAD_PARTS.length) {
+          return JSON.stringify({ ok: false, error: '热更新源码分片缺失' });
         }
-      });
+        var code = window.__GT_HOT_RELOAD_PARTS.join('');
+        delete window.__GT_HOT_RELOAD_PARTS;
+        (0, eval)(code);
+        if (!window.__GT_AUTOPILOT_APP__ && window.createGalacticTycoonsAutopilot) {
+          window.__GT_AUTOPILOT_APP__ = window.createGalacticTycoonsAutopilot(window).start();
+        }
+        var clearButton = document.querySelector('button[data-atomic-action="wishlist_clear_base_wishlist"]');
+        return JSON.stringify({
+          ok: true,
+          url: location.href,
+          version: window.__GT_AUTOPILOT_APP__ && window.__GT_AUTOPILOT_APP__.version,
+          panel: document.getElementById('gtap-panel') && document.getElementById('gtap-panel').innerText.slice(0, 120),
+          clearButton: clearButton && {
+            text: clearButton.innerText,
+            status: clearButton.getAttribute('data-atomic-status'),
+            style: clearButton.getAttribute('style'),
+            background: getComputedStyle(clearButton).backgroundImage || getComputedStyle(clearButton).backgroundColor,
+            color: getComputedStyle(clearButton).color
+          }
+        });
+      } catch (error) {
+        return JSON.stringify({
+          ok: false,
+          error: error && error.message ? error.message : String(error),
+          name: error && error.name,
+          stack: error && error.stack ? String(error.stack).slice(0, 1200) : '',
+          url: location.href
+        });
+      }
     })()
   `);
-  return JSON.parse(rawResult);
+  return parseInjectedScriptResult(rawResult);
+}
+
+function parseInjectedScriptResult(rawResult) {
+  if (!rawResult || rawResult === 'missing value') {
+    throw new Error('Chrome 没有返回热更新结果，可能是注入脚本执行失败或返回值为空');
+  }
+  var result;
+  try {
+    result = JSON.parse(rawResult);
+  } catch (error) {
+    throw new Error('热更新结果不是 JSON：' + rawResult);
+  }
+  if (result && result.ok === false) {
+    throw new Error('热更新注入失败：' + (result.error || result.name || '未知错误'));
+  }
+  return result;
 }
 
 function validateInjectionResult(result, options = {}) {
@@ -173,5 +203,6 @@ module.exports = {
   hotReloadChrome,
   listChromeTabs,
   parseChromeTabs,
+  parseInjectedScriptResult,
   validateInjectionResult,
 };
