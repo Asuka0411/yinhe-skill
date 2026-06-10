@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.66');
+  assert.equal(api.version, '0.1.67');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -2990,6 +2990,10 @@ test('06 转移到飞船入口会使用配置的转移黑名单', async () => {
     'ship:200000 反物质-09',
     'row-transfer:Antimatter',
     'confirm:Antimatter',
+    'row-transfer:Workwear',
+    'confirm:Workwear',
+    'row-transfer:Kryon',
+    'confirm:Kryon',
     'row-transfer:Bioxene',
     'confirm:Bioxene'
   ]);
@@ -2997,6 +3001,8 @@ test('06 转移到飞船入口会使用配置的转移黑名单', async () => {
   assert.deepEqual(doc.state.returnClicked, []);
   assert.deepEqual(transfer.transferSummary, [
     { name: 'Antimatter', amount: 2994 },
+    { name: 'Workwear', amount: 17808 },
+    { name: 'Kryon', amount: 83080 },
     { name: 'Bioxene', amount: 16616 }
   ]);
 });
@@ -3047,10 +3053,16 @@ test('06 转移到飞船会用实时选中的 Exchange 货仓修正旧 transit �
 
   assert.deepEqual(order, [
     'ship:200000 反物质-10',
+    'row-transfer:Workwear',
+    'confirm:Workwear',
+    'row-transfer:Kryon',
+    'confirm:Kryon',
     'row-transfer:Bioxene',
     'confirm:Bioxene'
   ]);
   assert.deepEqual(transfer.transferSummary, [
+    { name: 'Workwear', amount: 17808 },
+    { name: 'Kryon', amount: 83080 },
     { name: 'Bioxene', amount: 16616 }
   ]);
 });
@@ -3109,10 +3121,66 @@ test('06 转移到飞船在交易所页基地上下文丢失时信任实时选�
 
   assert.deepEqual(order, [
     'ship:200000 反物质-10',
+    'row-transfer:Workwear',
+    'confirm:Workwear',
+    'row-transfer:Kryon',
+    'confirm:Kryon',
     'row-transfer:Bioxene',
     'confirm:Bioxene'
   ]);
   assert.deepEqual(transfer.ship, { name: '200000 反物质-10', locationText: 'Exchange Station' });
+});
+
+test('06 转移到飞船没有购买缓存时不再校验空 wishlist 而是读取交易所仓库行', async () => {
+  const order = [];
+  const doc = createExchangeWarehouseTransferAllDoc(order, {
+    exchangeRows: [
+      { name: 'Ship Repair Kit', amount: '2,000', weight: '1,500' },
+      { name: 'Antimatter', amount: '2,994', weight: '8,982' },
+      { name: 'Bioxene', amount: '16,616', weight: '16,616' },
+      { name: 'Kryon', amount: '83,080', weight: '62,310' }
+    ]
+  });
+  let readWishlistCalled = false;
+  const api = createGtAutopilot({
+    document: doc,
+    setTimeout(resolve) {
+      resolve();
+    },
+    __testHooks: {
+      readWishlistRowsFromApi: () => {
+        readWishlistCalled = true;
+        return Promise.resolve([]);
+      }
+    }
+  });
+
+  const transfer = await api._testRunWishlistTransferToShip({
+    base: { id: 9, name: '0-冶炼 合金09', planetId: 877 },
+    config: {
+      wishlistTransferBlacklist: [
+        { id: 113, name: 'Ship Repair Kit', enabled: true },
+        { id: 149, name: 'Antimatter', enabled: true }
+      ]
+    },
+    shipInfo: {
+      location: 'exchange',
+      ship: { name: '200000 反物质-09', capacity: 200000 }
+    }
+  });
+
+  assert.equal(readWishlistCalled, false);
+  assert.deepEqual(order, [
+    'ship:200000 反物质-09',
+    'row-transfer:Bioxene',
+    'confirm:Bioxene',
+    'row-transfer:Kryon',
+    'confirm:Kryon'
+  ]);
+  assert.deepEqual(transfer.transferSummary, [
+    { name: 'Bioxene', amount: 16616 },
+    { name: 'Kryon', amount: 83080 }
+  ]);
 });
 
 test('转移到飞船原子功能会把 wishlist 条目转成装船批次', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.66
+// @version      0.1.67
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,7 +66,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.66';
+  var APP_VERSION = '0.1.67';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -353,6 +353,33 @@
           current: row.amount,
         };
       }),
+    };
+  }
+
+  function planWishlistTransferFromWarehouseRows(snapshot, rows) {
+    var shipInfo = snapshot && snapshot.shipInfo || {};
+    var ship = shipInfo.ship;
+    if (!ship) {
+      throw new Error('未找到当前基地对应飞船');
+    }
+    if (shipInfo.location !== 'exchange') {
+      throw new Error('飞船不在交易所：当前位置=' + normalizeText(shipInfo.location || 'unknown'));
+    }
+    var normalized = (rows || []).filter(function (row) {
+      return row && row.name && Number(row.current || row.amount) > 0;
+    }).map(function (row) {
+      return {
+        id: Number(row.id || 0),
+        name: row.name,
+        current: Number(row.current || row.amount),
+      };
+    });
+    if (!normalized.length) {
+      throw new Error('交易所仓库无可转移物资');
+    }
+    return {
+      ship: ship,
+      batch: normalized,
     };
   }
 
@@ -2138,16 +2165,17 @@
     }
 
     function runWishlistTransferToShip(snapshot) {
-      var readWishlistRows = testHooks.readWishlistRowsFromApi || readWishlistRowsFromApi;
       var loadShip = testHooks.loadBatchOntoShip || loadBatchOntoShip;
       var config = snapshot && snapshot.config || (state.baseStore ? state.baseStore.read() : deepClone(DEFAULTS));
       var cachedRows = state.lastWishlistPurchaseRows && state.lastWishlistPurchaseRows.length
         ? deepClone(state.lastWishlistPurchaseRows)
         : null;
-      var rowsPromise = cachedRows ? Promise.resolve(cachedRows) : readWishlistRows(snapshot && snapshot.base);
-      return rowsPromise.then(function (rows) {
+      var rows = cachedRows || readExchangeWarehouseTransferRows(config.wishlistTransferBlacklist || DEFAULTS.wishlistTransferBlacklist);
+      return Promise.resolve().then(function () {
         var effectiveSnapshot = resolveLiveWishlistTransferSnapshot(snapshot, doc);
-        var plan = planWishlistTransferBatch(effectiveSnapshot, rows);
+        var plan = cachedRows
+          ? planWishlistTransferBatch(effectiveSnapshot, rows)
+          : planWishlistTransferFromWarehouseRows(effectiveSnapshot, rows);
         pushStep('转移到飞船', plan.ship.name + '，' + plan.batch.length + ' 种物资');
         return loadShip(plan.batch, plan.ship, config.wishlistTransferBlacklist || DEFAULTS.wishlistTransferBlacklist).then(function (transferSummary) {
           pushStep('转移完成', transferSummary.length ? transferSummary.map(function (item) {
@@ -3524,6 +3552,66 @@
       return new Set(normalizeMaterialBlocklist(blacklist || DEFAULTS.wishlistTransferBlacklist, materialNames)
         .filter(function (entry) { return entry.enabled; })
         .map(function (entry) { return Number(entry.id); }));
+    }
+
+    function parseWarehouseRowTransferItem(rowText) {
+      var text = normalizeText(rowText);
+      if (!text) {
+        return null;
+      }
+      var names = materialNames || defaultMaterialNames();
+      var ids = Object.keys(names).map(function (id) { return Number(id); }).sort(function (a, b) {
+        return String(names[b] || '').length - String(names[a] || '').length;
+      });
+      for (var i = 0; i < ids.length; i += 1) {
+        var id = ids[i];
+        var name = names[id];
+        if (!matchesWarehouseRowMaterial(text, name)) {
+          continue;
+        }
+        var rest = normalizeText(text.slice(normalizeText(name).length));
+        if (normalizeText(name).toLowerCase() === 'basic construction kit' && /^Construction Kit/i.test(text)) {
+          rest = normalizeText(text.replace(/^Construction Kit/i, ''));
+        }
+        if (normalizeText(name).toLowerCase() === 'basic rations' && /^Rations/i.test(text)) {
+          rest = normalizeText(text.replace(/^Rations/i, ''));
+        }
+        var amountMatch = rest.match(/[\d][\d,.]*/);
+        var amount = amountMatch ? parseNumber(amountMatch[0], 0) : 0;
+        if (amount > 0) {
+          return {
+            id: id,
+            name: name,
+            amount: amount,
+            current: amount,
+          };
+        }
+      }
+      return null;
+    }
+
+    function readExchangeWarehouseTransferRows(transferBlacklist) {
+      if (!doc || typeof doc.querySelectorAll !== 'function') {
+        return [];
+      }
+      var blocked = enabledTransferBlacklistIds(transferBlacklist);
+      var rows = Array.prototype.slice.call(doc.querySelectorAll('tr, [role="row"], .mat-row, .mat-item'));
+      var seen = new Set();
+      return rows.map(function (row) {
+        var buttons = Array.prototype.slice.call(row.querySelectorAll ? row.querySelectorAll('button') : []);
+        var hasTransferButton = buttons.some(function (button) {
+          return String(button.innerHTML || '').indexOf('#arrow-right') >= 0 || String(button.innerHTML || '').indexOf('arrow-right') >= 0;
+        });
+        if (!hasTransferButton) {
+          return null;
+        }
+        var item = parseWarehouseRowTransferItem(row.textContent || row.innerText || '');
+        if (!item || blocked.has(Number(item.id)) || seen.has(Number(item.id))) {
+          return null;
+        }
+        seen.add(Number(item.id));
+        return item;
+      }).filter(Boolean);
     }
 
     function findShipWarehouseReturnButton(materialName) {
