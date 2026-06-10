@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.64
+// @version      0.1.65
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,7 +66,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.64';
+  var APP_VERSION = '0.1.65';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -354,6 +354,18 @@
         };
       }),
     };
+  }
+
+  function resolveLiveWishlistTransferSnapshot(snapshot, docRef) {
+    var liveShipInfo = inferShipLocation(snapshot && snapshot.company, snapshot && snapshot.base || {}, docRef);
+    var liveShip = liveShipInfo && liveShipInfo.ship;
+    var targetShip = snapshot && snapshot.shipInfo && snapshot.shipInfo.ship;
+    var liveMatchesTarget = liveShip && targetShip && normalizeText(liveShip.name) === normalizeText(targetShip.name);
+    var liveMatchesBase = liveShip && shipMatchesBase(liveShip, snapshot && snapshot.base);
+    if (liveShipInfo && liveShipInfo.location === 'exchange' && (liveMatchesTarget || liveMatchesBase)) {
+      return Object.assign({}, snapshot || {}, { shipInfo: liveShipInfo });
+    }
+    return snapshot;
   }
 
   function planWishlistSendShipHome(snapshot) {
@@ -2128,7 +2140,8 @@
         : null;
       var rowsPromise = cachedRows ? Promise.resolve(cachedRows) : readWishlistRows(snapshot && snapshot.base);
       return rowsPromise.then(function (rows) {
-        var plan = planWishlistTransferBatch(snapshot, rows);
+        var effectiveSnapshot = resolveLiveWishlistTransferSnapshot(snapshot, doc);
+        var plan = planWishlistTransferBatch(effectiveSnapshot, rows);
         pushStep('转移到飞船', plan.ship.name + '，' + plan.batch.length + ' 种物资');
         return loadShip(plan.batch, plan.ship, config.wishlistTransferBlacklist || DEFAULTS.wishlistTransferBlacklist).then(function (transferSummary) {
           pushStep('转移完成', transferSummary.length ? transferSummary.map(function (item) {

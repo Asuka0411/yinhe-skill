@@ -669,7 +669,7 @@ function createExchangeWarehouseTransferAllDoc(order, options = {}) {
     pendingConfirm: null,
     confirmClickedNames: [],
   };
-  const shipNames = ['200000 反物质-01', '200000 反物质-09'];
+  const shipNames = options.shipNames || ['200000 反物质-01', '200000 反物质-09'];
   function shipInputId(name) {
     return 'btnradio-whwt-' + name;
   }
@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.64');
+  assert.equal(api.version, '0.1.65');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -2997,6 +2997,60 @@ test('06 转移到飞船入口会使用配置的转移黑名单', async () => {
   assert.deepEqual(doc.state.returnClicked, []);
   assert.deepEqual(transfer.transferSummary, [
     { name: 'Antimatter', amount: 2994 },
+    { name: 'Bioxene', amount: 16616 }
+  ]);
+});
+
+test('06 转移到飞船会用实时选中的 Exchange 货仓修正旧 transit 快照', async () => {
+  const order = [];
+  const doc = createExchangeWarehouseTransferAllDoc(order, {
+    initialShip: '200000 反物质-10',
+    shipNames: ['200000 反物质-09', '200000 反物质-10']
+  });
+  const api = createGtAutopilot({
+    document: doc,
+    setTimeout(resolve) {
+      resolve();
+    },
+    __testHooks: {
+      readWishlistRowsFromApi: () => Promise.resolve([
+        { id: 12, name: 'Bioxene', amount: 16616, weight: 1 }
+      ])
+    }
+  });
+
+  const transfer = await api._testRunWishlistTransferToShip({
+    base: { id: 10, name: '0-冶炼 合金10', planetId: 877 },
+    company: {
+      exWhId: 202,
+      ships: [
+        {
+          id: 10,
+          name: '200000 反物质-10',
+          warehouseId: 0,
+          pId: 0,
+          flight: { aDate: '2026-06-09T12:00:00Z' }
+        }
+      ]
+    },
+    shipInfo: {
+      location: 'transit',
+      ship: {
+        id: 10,
+        name: '200000 反物质-10',
+        warehouseId: 0,
+        pId: 0,
+        flight: { aDate: '2026-06-09T12:00:00Z' }
+      }
+    }
+  });
+
+  assert.deepEqual(order, [
+    'ship:200000 反物质-10',
+    'row-transfer:Bioxene',
+    'confirm:Bioxene'
+  ]);
+  assert.deepEqual(transfer.transferSummary, [
     { name: 'Bioxene', amount: 16616 }
   ]);
 });
