@@ -28,7 +28,7 @@
 
 ## 当前验证状态
 
-截至 2026-06-10，当前脚本版本为 `v0.1.62`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `128/128` 通过。
+截至 2026-06-10，当前脚本版本为 `v0.1.63`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `129/129` 通过。
 
 本轮已完成：
 
@@ -52,7 +52,7 @@
   - 若按比例下调后页面 `TOTAL WEIGHT` 仍超过飞船容量，则继续以 `0.5` 天为单位递减并重新读取重量
   - 若降到 `0.5` 天仍超重，则直接失败并停止，不点击 `Add to Wishlist`
   - 真实页面模式下控件缺失会直接失败，不再回退到估算结果伪装成功
-- 当前脚本版本为 `v0.1.62`
+- 当前脚本版本为 `v0.1.63`
 - 04 `创建补给 wishlist` 已完成玩家实测验证，按钮状态已从 `可测试` 改为 `已验证`，按钮样式已同步为绿色
 - 05 `打开交易所` 与 06 `读取 wishlist` 已从补货回运原子步骤面板删除；对应能力保留在 `购买 wishlist` 内部流程中
 - 05 `购买 wishlist` 已改为玩家点击流程：先在当前基地 `Resupply` 页面点击 `View Wishlist`，进入交易所 wishlist 后逐项点击 wishlist 物资行，确认右侧购买数量后点击最终 `Buy`
@@ -82,10 +82,10 @@
 - 08 已改名为 `一键补修理包、油`，并改为复用现有补飞船修理材料逻辑：按交易所仓库现有数量把 `Antimatter (#149)` 与 `Ship Repair Kit (#113)` 补到目标库存 `2000`
 - `navigateToExchangePage` 已移除直接设置 `location.href` 的兜底；找不到游戏内 `Exchange` 按钮时直接失败，正常游戏操作不强跳页面
 - 已修复一键卖货在点击 `Exchange` 后没有确认进入交易所的问题：现在会等待交易所路径或 `Exchange Warehouse`、`My Offers`、`Contracts`、交易所仓库卖货入口等页面特征；如果仍停在基地仓库页，会报 `未进入交易所页面` 并停止，不会在基地仓库误找卖货按钮
-- 已修复一键卖货找不到 `Basic Construction Kit` 卖货按钮的问题：真实交易所仓库行显示为 `Construction Kit`，脚本现在会把 `Basic Construction Kit` 精确映射到该行并点击钱袋图标；该兼容不扩大到其它物资名
+- 已修复一键卖货找不到 `Basic Construction Kit` 与 `Basic Rations` 卖货按钮的问题：真实交易所仓库行分别显示为 `Construction Kit` 与 `Rations`，脚本现在会精确映射到对应行并点击钱袋图标；该兼容不扩大到其它物资名
 - 已加固 `scripts/hot-reload-chrome.js`：当 Chrome 返回 `missing value` 或页面返回注入异常时，会输出明确错误，不再只暴露 JSON 解析失败
-- 已执行 `npm run release:local`，持久安装更新目标为 `v0.1.62`
-- 已执行 `node scripts/hot-reload-chrome.js`，当前已打开的游戏页内存版本为 `v0.1.62`
+- 已执行 `npm run release:local`，持久安装更新目标为 `v0.1.63`
+- 已执行 `node scripts/hot-reload-chrome.js`，当前已打开的游戏页内存版本为 `v0.1.63`
 - 已加固 `scripts/hot-reload-chrome.js` 的注入结果校验：热更新后必须确认实际 `location.href` 仍是 `galactictycoons.com` 游戏页，避免 Chrome 错误页带着旧面板被误判为成功
 - 已通过只读查询确认当前游戏页补货回运原子步骤数量为 9，且不存在 05 `打开交易所` 与 06 `读取 wishlist`
 - 已通过只读查询确认当前游戏页中 01、02、03、04、05 原子按钮状态均为 `done` 且显示绿色

@@ -114,7 +114,7 @@ python3 -m http.server 18793
 
 ## 当前状态
 
-截至 `2026-06-10`，当前脚本版本为 `v0.1.62`，完整本地 Node 单测 `128/128` 通过。
+截至 `2026-06-10`，当前脚本版本为 `v0.1.63`，完整本地 Node 单测 `129/129` 通过。
 
 清空 wishlist 已支持按 `View Wishlist` 数量判断：数量为 `0` 时不进入交易所，数量大于 `0` 时进入对应 wishlist、点击编辑、执行 `Clear Wishlist`，完成后回到原基地页面。相关进度已整理到 [状态总览](/Users/dango/Documents/yinhe-skill/docs/superpowers/status/2026-06-08-galactic-tycoons-autopilot-status.md)。
 
@@ -132,7 +132,7 @@ python3 -m http.server 18793
 
 一键卖货已加固交易所导航校验：点击游戏内 `Exchange` 后必须确认地址进入交易所，或页面出现 `Exchange Warehouse`、`My Offers`、`Contracts`、交易所仓库卖货入口等交易所特征；如果仍停留在基地仓库页，会报 `未进入交易所页面` 并停止，不会继续查找或点击卖货按钮。
 
-一键卖货已兼容交易所仓库真实页面物资简写：脚本计划里的 `Basic Construction Kit` 会匹配页面行 `Construction Kit`，并点击该行的钱袋卖货按钮；该兼容只针对该物资，不放宽其它物资名匹配，避免误点相邻物资。
+一键卖货已兼容交易所仓库真实页面物资简写：脚本计划里的 `Basic Construction Kit` 会匹配页面行 `Construction Kit`，`Basic Rations` 会匹配页面行 `Rations`，并点击对应行的钱袋卖货按钮；该兼容只针对这些物资，不放宽其它物资名匹配，避免误点相邻物资。
 
 Chrome 热更新脚本已加固诊断：如果注入阶段返回 `missing value` 或页面返回注入异常，会输出明确的热更新失败原因，避免只看到 JSON 解析错误。
 

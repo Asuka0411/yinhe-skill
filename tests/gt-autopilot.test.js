@@ -608,6 +608,17 @@ function createExchangeWarehouseSellDoc() {
       this.clicked = true;
     }
   };
+  const rationsSellButton = {
+    textContent: '',
+    innerHTML: '<svg class="iu"><use xlink:href="/assets/atlas-CfGX3EZO.svg#sack-dollar"></use></svg>',
+    clicked: false,
+    getClientRects() {
+      return [{}];
+    },
+    click() {
+      this.clicked = true;
+    }
+  };
   const repairRow = {
     textContent: 'Ship Repair Kit 2,000',
     querySelectorAll(selector) {
@@ -626,14 +637,21 @@ function createExchangeWarehouseSellDoc() {
       return selector === 'button' ? [constructionSellButton] : [];
     }
   };
+  const rationsRow = {
+    textContent: 'Rations 125,722 12,572t $6.3m',
+    querySelectorAll(selector) {
+      return selector === 'button' ? [rationsSellButton] : [];
+    }
+  };
   return {
     repairBuyButton,
     containmentBuyButton,
     containmentSellButton,
     constructionSellButton,
+    rationsSellButton,
     querySelectorAll(selector) {
       if (selector === 'tr, [role="row"], .mat-row, .mat-item') {
-        return [repairRow, containmentRow, constructionRow];
+        return [repairRow, containmentRow, constructionRow, rationsRow];
       }
       return [];
     }
@@ -1868,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.62');
+  assert.equal(api.version, '0.1.63');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -3701,6 +3719,15 @@ test('交易所仓库卖货 helper 会兼容 Construction Kit 的真实页面简
   assert.equal(api.clickExchangeWarehouseSellButtonInDocument(doc, 'Basic Construction Kit'), true);
   assert.equal(doc.containmentSellButton.clicked, false);
   assert.equal(doc.constructionSellButton.clicked, true);
+});
+
+test('交易所仓库卖货 helper 会兼容 Rations 的真实页面简写', () => {
+  const api = createGtAutopilot();
+  const doc = createExchangeWarehouseSellDoc();
+
+  assert.equal(api.clickExchangeWarehouseSellButtonInDocument(doc, 'Basic Rations'), true);
+  assert.equal(doc.containmentSellButton.clicked, false);
+  assert.equal(doc.rationsSellButton.clicked, true);
 });
 
 test('卖货 offer helper 会填最低价后调用价格输入框下调一档', () => {
