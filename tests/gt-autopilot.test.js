@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.67');
+  assert.equal(api.version, '0.1.68');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -1989,13 +1989,12 @@ test('老卖货配置只渲染白名单，一键卖货配置只渲染黑名单',
   assert.doesNotMatch(containers['gtap-sell-config'].innerHTML, /data-whitelist-row/);
 });
 
-test('原子功能按钮定义包含加油、修飞船、修建筑、补修理材料', () => {
+test('原子功能按钮定义合并加油修理并保留修建筑、补材料', () => {
   const api = createGtAutopilot();
   assert.deepEqual(api.getAtomicActions(), [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
     { action: 'buy_wishlist', label: '一键购买 wishlist', status: 'ready' },
-    { action: 'fuel_ship', label: '一键加油' },
-    { action: 'repair_ship', label: '一键修飞船' },
+    { action: 'fuel_and_repair_ship', label: '一键加油、修理', status: 'ready' },
     { action: 'repair_base_buildings', label: '一键修基地建筑' },
     { action: 'restock_ship_repair_materials', label: '一键补飞船修理材料' }
   ]);
@@ -3533,6 +3532,32 @@ test('飞船补油修理原子功能会处理所有交易所飞船', async () =>
   ]);
 });
 
+test('一键加油、修理复用 07 处理所有交易所飞船', async () => {
+  const doc = createMultiShipMaintenanceDoc([
+    { name: '200000 反物质-09', location: 'Exchange Station' }
+  ]);
+  const api = createGtAutopilot({
+    document: doc,
+    setTimeout(callback) {
+      callback();
+    }
+  });
+
+  const result = await api._testRunWishlistAtomicAction('fuel_and_repair_ship', {
+    shipInfo: { location: 'exchange', ship: { name: '200000 反物质-09' } }
+  });
+
+  assert.deepEqual(result.results.map((entry) => entry.ship.name), ['200000 反物质-09']);
+  assert.deepEqual(result.results[0].maintenance.map((entry) => entry.mode), ['fuel', 'repair']);
+  assert.deepEqual(doc.events, [
+    'open:200000 反物质-09',
+    'trigger:200000 反物质-09:fuel',
+    'confirm:200000 反物质-09:fuel:2956',
+    'trigger:200000 反物质-09:repair',
+    'confirm:200000 反物质-09:repair:1900'
+  ]);
+});
+
 test('飞船补油修理原子功能在只有交易所仓库飞船标签时会先选中飞船', async () => {
   const doc = createMultiShipMaintenanceDoc([
     { name: '200000 反物质-09', hideShipLink: true },
@@ -3785,14 +3810,14 @@ test('原子功能当前只有一键卖货标记为已完成', () => {
   assert.deepEqual(doneActions, ['sell_exchange_inventory']);
 });
 
-test('原子功能入口当前返回待接入状态', () => {
+test('一键加油、修理入口复用 07 飞船补油修理流程', () => {
   const api = createGtAutopilot();
-  const result = api.runAtomicAction('fuel_ship');
+  const result = api.runAtomicAction('fuel_and_repair_ship');
   assert.deepEqual(result, {
-    action: 'fuel_ship',
-    label: '一键加油',
-    status: 'pending',
-    message: '一键加油：真实流程待接入'
+    action: 'fuel_and_repair_ship',
+    label: '一键加油、修理',
+    status: 'ready',
+    message: '一键加油、修理：可测试'
   });
 });
 
