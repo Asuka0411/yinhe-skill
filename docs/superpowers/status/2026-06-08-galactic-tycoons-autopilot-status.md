@@ -1,6 +1,6 @@
 # Galactic Tycoons 自动脚本当前状态
 
-> 更新日期：2026-06-10
+> 更新日期：2026-06-16
 
 ## 项目定位
 
@@ -28,10 +28,14 @@
 
 ## 当前验证状态
 
-截至 2026-06-10，当前脚本版本为 `v0.1.70`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `145/145` 通过。
+截至 2026-06-16，当前脚本版本为 `v0.1.71`，`node --test tests/release-local.test.js tests/hot-reload-chrome.test.js tests/gt-autopilot.test.js` 的结果为 `149/149` 通过。
 
 本轮已完成：
 
+- `v0.1.71` 修复 `检查` 按钮点击后无响应、且不执行任何操作的问题：原 `检查` 只打印基地名与飞船位置就结束，从不在识别位置后分发执行；`startRun` 又写在读取成功分支内，读取失败只走日志不进历史、点击后也无即时反馈，表现为“点了没动静”
+- `检查` 已重写为位置调度器 `runCheck`：点击后立即写入“检查：开始读取基地与飞船状态”，再读取基地与飞船位置，并按 `pickInitialChain` 分发——基地走卖货链、交易所走补货回运链（转移到飞船并发船回基地）、运输中只等待；读取失败会写入“检查失败：<原因>”并进入运行历史，不再静默
+- `handleAction` 在任务锁判断后直接短路到 `runCheck`，并新增 `runChainWithErrorHandling` 统一链路异常处理；`api` 暴露 `_testRunCheck` 测试入口
+- 已为 `检查` 新增 4 个单元测试（基地分发卖货、交易所分发补货回运、运输中只等待、读取失败仍写失败日志），并在本地 harness 的 `seed=sell` / `seed=transit` / `seed=resupply` 三个场景实跑验证点击 `检查` 的位置识别与分发
 - `清空基地 wishlist` 会读取当前基地 `Resupply` 页面的 `View Wishlist(n)` 数量
 - 当数量为 `0` 时，不进入交易所
 - 当数量大于 `0` 时，点击进入交易所对应 wishlist

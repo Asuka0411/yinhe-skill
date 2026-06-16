@@ -1886,7 +1886,7 @@ test('base store 默认包含 wiki API key', () => {
 
 test('脚本会导出当前版本号', () => {
   const api = createGtAutopilot();
-  assert.equal(api.version, '0.1.70');
+  assert.equal(api.version, '0.1.71');
 });
 
 test('原子功能测试区域会把旧流程按钮放在最后', () => {
@@ -4838,4 +4838,87 @@ test('findPriceForMaterial 会优先按 matId 匹配价格', () => {
 
   assert.deepEqual(api.findPriceForMaterial(prices, 172), { id: 2, matId: 172, price: 4200 });
   assert.equal(api.findPriceForMaterial(prices, 999), null);
+});
+
+function createCheckEnv(readBaseContext) {
+  const logPanel = { textContent: '', scrollTop: 0, scrollHeight: 0 };
+  const doc = {
+    getElementById(id) {
+      return id === 'gtap-log' ? logPanel : null;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const chainCalls = [];
+  const env = {
+    document: doc,
+    window: { location: { href: 'https://g2.galactictycoons.com/', pathname: '/' } },
+    setTimeout(callback) {
+      callback();
+    },
+    __testHooks: {
+      readBaseContext: readBaseContext,
+      runSelectedChain(chain, snapshot) {
+        chainCalls.push(chain);
+        return Promise.resolve({ chain: chain, next: 'done', snapshot: snapshot });
+      }
+    }
+  };
+  return { env: env, logPanel: logPanel, chainCalls: chainCalls };
+}
+
+test('检查会按飞船在基地分发到卖货链', async () => {
+  const ctx = createCheckEnv(() => Promise.resolve({
+    base: { id: 9, name: '0-冶炼 合金09' },
+    config: {},
+    shipInfo: { location: 'base', ship: { name: '200000 反物质-09' } }
+  }));
+  const api = createGtAutopilot(ctx.env);
+
+  await api._testRunCheck();
+
+  assert.deepEqual(ctx.chainCalls, ['sell_chain']);
+  assert.match(ctx.logPanel.textContent, /检查：开始读取基地与飞船状态/);
+  assert.match(ctx.logPanel.textContent, /飞船位置：base/);
+  assert.match(ctx.logPanel.textContent, /执行卖货到交易所/);
+});
+
+test('检查会按飞船在交易所分发到补货回运链', async () => {
+  const ctx = createCheckEnv(() => Promise.resolve({
+    base: { id: 9, name: '0-冶炼 合金09' },
+    config: {},
+    shipInfo: { location: 'exchange', ship: { name: '200000 反物质-09' } }
+  }));
+  const api = createGtAutopilot(ctx.env);
+
+  await api._testRunCheck();
+
+  assert.deepEqual(ctx.chainCalls, ['resupply_chain']);
+  assert.match(ctx.logPanel.textContent, /转移货物到飞船并发船回基地/);
+});
+
+test('检查在飞船运输中时只等待不执行链路', async () => {
+  const ctx = createCheckEnv(() => Promise.resolve({
+    base: { id: 9, name: '0-冶炼 合金09' },
+    config: {},
+    shipInfo: { location: 'transit', ship: { name: '200000 反物质-09' } }
+  }));
+  const api = createGtAutopilot(ctx.env);
+
+  await api._testRunCheck();
+
+  assert.deepEqual(ctx.chainCalls, []);
+  assert.match(ctx.logPanel.textContent, /飞船运输中，等待到达基地/);
+});
+
+test('检查在读取基地失败时仍写入失败日志而不是静默', async () => {
+  const ctx = createCheckEnv(() => Promise.reject(new Error('GTLocalAPI timeout for getMyCompany')));
+  const api = createGtAutopilot(ctx.env);
+
+  await api._testRunCheck();
+
+  assert.deepEqual(ctx.chainCalls, []);
+  assert.match(ctx.logPanel.textContent, /检查：开始读取基地与飞船状态/);
+  assert.match(ctx.logPanel.textContent, /检查失败：GTLocalAPI timeout for getMyCompany/);
 });

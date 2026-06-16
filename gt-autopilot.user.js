@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Galactic Tycoons Autopilot
 // @namespace    https://g2.galactictycoons.com/
-// @version      0.1.70
+// @version      0.1.71
 // @updateURL    http://127.0.0.1:18793/gt-autopilot.user.js
 // @downloadURL  http://127.0.0.1:18793/gt-autopilot.user.js
 // @description  Galactic Tycoons 单基地单飞船自动化面板：卖货、补货、检查、等待、停止
@@ -66,7 +66,7 @@
   var DESTINATION_INPUT_HINTS = ['destination', 'Destination', '目的地'];
   var SELL_FORM_BUTTON_TEXTS = ['Sell', 'sell', '卖出', '出售'];
   var STOP_REASON = 'stopped';
-  var APP_VERSION = '0.1.70';
+  var APP_VERSION = '0.1.71';
   var MATERIAL_ATLAS_HREF = '/assets/atlas-_p6d2Xs0.svg';
   var ATOMIC_ACTIONS = [
     { action: 'sell_exchange_inventory', label: '一键卖货', status: 'done' },
@@ -5111,6 +5111,61 @@
       container.innerHTML = html;
     }
 
+    function runChainWithErrorHandling(chain, snapshot) {
+      var runChain = testHooks.runSelectedChain || runSelectedChain;
+      return Promise.resolve()
+        .then(function () {
+          return runChain(chain, snapshot);
+        })
+        .catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('失败', state.lastError);
+          finishRun('failed', { error: state.lastError });
+        });
+    }
+
+    function runCheck() {
+      var readContext = testHooks.readBaseContext || readBaseContext;
+      startRun('check');
+      pushStep('检查', '开始读取基地与飞船状态');
+      return Promise.resolve()
+        .then(function () {
+          return readContext();
+        })
+        .then(function (snapshot) {
+          var info = snapshot || {};
+          var baseName = info.base ? (info.base.name || ('Base ' + info.base.id)) : '未识别基地';
+          var location = info.shipInfo ? info.shipInfo.location : 'unknown';
+          pushStep('基地', baseName);
+          pushStep('飞船位置', location);
+          syncPanelConfig(info.config);
+          renderConfig(info.config);
+
+          var nextChain = pickInitialChain(info);
+          if (nextChain === 'sell_chain') {
+            pushStep('检查结论', '飞船在基地，执行卖货到交易所');
+            finishRun('success', { location: location, next: 'sell_chain' });
+            return runChainWithErrorHandling('sell_chain', info);
+          }
+          if (nextChain === 'resupply_chain') {
+            pushStep('检查结论', '飞船在交易所，转移货物到飞船并发船回基地');
+            finishRun('success', { location: location, next: 'resupply_chain' });
+            return runChainWithErrorHandling('resupply_chain', info);
+          }
+          var waitDetail = location === 'transit'
+            ? '飞船运输中，等待到达基地'
+            : ('飞船位置=' + location + '，暂不操作');
+          pushStep('检查结论', waitDetail);
+          finishRun('waiting', { location: location, next: 'wait' });
+          return { next: 'wait', location: location, snapshot: info };
+        })
+        .catch(function (error) {
+          state.lastError = String(error && error.message ? error.message : error);
+          pushStep('检查失败', state.lastError);
+          finishRun('failed', { error: state.lastError });
+        });
+    }
+
     function handleAction(action) {
       if (action === 'stop') {
         stop();
@@ -5122,17 +5177,12 @@
         return;
       }
 
-      readBaseContext().then(function (snapshot) {
-        if (action === 'check') {
-          startRun('check');
-          pushStep('检查', snapshot.base ? (snapshot.base.name || ('Base ' + snapshot.base.id)) : '未识别基地');
-          pushStep('飞船位置', snapshot.shipInfo.location);
-          syncPanelConfig(snapshot.config);
-          renderConfig(snapshot.config);
-          finishRun('success', { location: snapshot.shipInfo.location });
-          return;
-        }
+      if (action === 'check') {
+        runCheck();
+        return;
+      }
 
+      readBaseContext().then(function (snapshot) {
         if (action === 'wait') {
           startRun('wait');
           pushStep('等待', '轮询中');
@@ -5294,6 +5344,7 @@
       _testRunRestockShipRepairMaterials: runRestockShipRepairMaterials,
       _testRunRepairBaseBuildings: runRepairBaseBuildings,
       _testRunWishlistAtomicAction: runWishlistAtomicAction,
+      _testRunCheck: runCheck,
       _testTransferExchangeWarehouseToShip: transferExchangeWarehouseToShip,
       _testClearWishlistFromUi: clearWishlistFromUi,
       _testNavigateToExchangePage: navigateToExchangePage,
